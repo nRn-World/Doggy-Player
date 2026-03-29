@@ -1,0 +1,5 @@
+{
+  "name": "DoggyStyle",
+  "description": "A modern web-based video player with custom zoom, panning, and speed features.",
+  "requestFramePermissions": []
+}

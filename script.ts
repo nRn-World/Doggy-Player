@@ -1,0 +1,22 @@
+import fs from 'fs';
+
+let content = fs.readFileSync('src/App.tsx', 'utf8');
+content = content.replace(/bg-\[theme-primary\]/g, 'bg-theme-primary');
+content = content.replace(/bg-\[theme-hover\]/g, 'bg-theme-hover');
+content = content.replace(/bg-\[theme-accent\]/g, 'bg-theme-accent');
+content = content.replace(/hover:bg-\[theme-primary\]/g, 'hover:bg-theme-primary');
+content = content.replace(/hover:bg-\[theme-hover\]/g, 'hover:bg-theme-hover');
+content = content.replace(/hover:bg-\[theme-accent\]/g, 'hover:bg-theme-accent');
+content = content.replace(/text-\[theme-primary\]/g, 'text-theme-primary');
+content = content.replace(/text-\[theme-hover\]/g, 'text-theme-hover');
+content = content.replace(/text-\[theme-accent\]/g, 'text-theme-accent');
+content = content.replace(/hover:text-\[theme-primary\]/g, 'hover:text-theme-primary');
+content = content.replace(/hover:text-\[theme-hover\]/g, 'hover:text-theme-hover');
+content = content.replace(/hover:text-\[theme-accent\]/g, 'hover:text-theme-accent');
+content = content.replace(/border-\[theme-primary\]/g, 'border-theme-primary');
+content = content.replace(/border-\[theme-hover\]/g, 'border-theme-hover');
+content = content.replace(/border-\[theme-accent\]/g, 'border-theme-accent');
+content = content.replace(/accent-\[theme-primary\]/g, 'accent-theme-primary');
+content = content.replace(/accent-\[theme-hover\]/g, 'accent-theme-hover');
+content = content.replace(/accent-\[theme-accent\]/g, 'accent-theme-accent');
+fs.writeFileSync('src/App.tsx', content);

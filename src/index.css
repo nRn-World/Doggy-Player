@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-theme-primary: var(--theme-primary);
+  --color-theme-primary-text: var(--theme-primary-text);
+  --color-theme-hover: var(--theme-hover);
+  --color-theme-accent: var(--theme-accent);
+  --color-theme-bg: var(--theme-bg);
+  --color-theme-bg-secondary: var(--theme-bg-secondary);
+  --color-theme-bg-tertiary: var(--theme-bg-tertiary);
+  --color-theme-text: var(--theme-text);
+  --color-theme-text-muted: var(--theme-text-muted);
+  --color-theme-border: var(--theme-border);
+  --color-theme-track: var(--theme-track);
+}
+
+:root {
+  --theme-primary: #7A4614;
+  --theme-primary-text: #ffffff;
+  --theme-hover: #633810;
+  --theme-accent: #9E5B1A;
+  --theme-bg: #000000;
+  --theme-bg-secondary: #171717;
+  --theme-bg-tertiary: #262626;
+  --theme-text: #ffffff;
+  --theme-text-muted: #a3a3a3;
+  --theme-border: #262626;
+  --theme-track: #404040;
+}
+
+.theme-dark {
+  --theme-primary: #3f3f46;
+  --theme-primary-text: #ffffff;
+  --theme-hover: #27272a;
+  --theme-accent: #a1a1aa;
+  --theme-bg: #000000;
+  --theme-bg-secondary: #171717;
+  --theme-bg-tertiary: #262626;
+  --theme-text: #ffffff;
+  --theme-text-muted: #a3a3a3;
+  --theme-border: #262626;
+  --theme-track: #404040;
+}
+
+.theme-light {
+  --theme-primary: #e4e4e7;
+  --theme-primary-text: #000000;
+  --theme-hover: #d4d4d8;
+  --theme-accent: #71717a;
+  --theme-bg: #ffffff;
+  --theme-bg-secondary: #f4f4f5;
+  --theme-bg-tertiary: #e4e4e7;
+  --theme-text: #000000;
+  --theme-text-muted: #52525b;
+  --theme-border: #d4d4d8;
+  --theme-track: #d4d4d8;
+}

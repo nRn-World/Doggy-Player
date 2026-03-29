@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background: #000; color: white; display: flex; flex-direction: column; align-items: center; padding: 50px; }
+  .logo-container {
+    position: relative;
+    width: 448px;
+    height: 314.18px; /* 448 * 864 / 1232 */
+    border: 1px solid red;
+  }
+  .logo-part {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .dog {
+    clip-path: polygon(0 0, 100% 0, 100% 46.3%, 0 46.3%);
+    transform: translateX(5.48%);
+  }
+  .cinelens {
+    clip-path: polygon(0 46.3%, 100% 46.3%, 100% 69.4%, 0 69.4%);
+    transform: translateX(5.76%);
+  }
+  .player {
+    clip-path: polygon(0 69.4%, 100% 69.4%, 100% 100%, 0 100%);
+    transform: translateX(-10.51%);
+  }
+  .line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    background: lime;
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+  <div class="logo-container">
+    <img src="https://lh3.googleusercontent.com/d/1PEKm1sRID-iwDHrCGll7tqyAiNkI_XKY?v=3" class="logo-part dog">
+    <img src="https://lh3.googleusercontent.com/d/1PEKm1sRID-iwDHrCGll7tqyAiNkI_XKY?v=3" class="logo-part cinelens">
+    <img src="https://lh3.googleusercontent.com/d/1PEKm1sRID-iwDHrCGll7tqyAiNkI_XKY?v=3" class="logo-part player">
+    <div class="line"></div>
+  </div>
+</body>
+</html>
