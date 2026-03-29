@@ -35,7 +35,7 @@ This project is **NOT** licensed under MIT. It is licensed under the **nRn World
 
 ---
 
-## 🏆 Why Choose DoggyStyle?
+## 🏆 Why Choose DoggyStyle Player?
 
 Here is how DoggyStyle compares to traditional media players:
 
