@@ -132,7 +132,7 @@ Educational contributions are welcome!
 
 ## 📄 License
 
-**ALL Copyright (c) 2026 nRn World (Robin Ayzit)**
+**ALL Copyright (c) 2026 nRn World**
 
 This project is licensed under a strict **Non-Commercial License**. Commercial use, redistribution for profit, or use by companies is prohibited without a purchased license. See the [LICENSE](LICENSE) file for the full legal text.
 
