@@ -502,7 +502,7 @@ export default function App() {
           setIptvSeries(seriesData.map((s: any) => ({
             id: s.series_id,
             name: s.name,
-            icon: s.last_modified,
+            icon: s.cover || s.stream_icon || "",
             category_id: s.category_id,
             url: `${baseUrl}/series/${xtreamUser}/${xtreamPass}/${s.series_id}.mkv`
           })));
