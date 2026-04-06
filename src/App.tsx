@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -363,6 +363,15 @@ export default function App() {
   const [iptvLimit, setIptvLimit] = useState(() => parseInt(localStorage.getItem('doggy_iptv_limit') || '100'));
   const [selectedSeriesInfo, setSelectedSeriesInfo] = useState<any>(null);
   const [isSeriesInfoLoading, setIsSeriesInfoLoading] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>(() => JSON.parse(localStorage.getItem('doggy_iptv_favorites') || '[]'));
+
+  useEffect(() => {
+    localStorage.setItem('doggy_iptv_favorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  const toggleFavorite = (favId: string) => {
+    setFavorites(prev => prev.includes(favId) ? prev.filter(id => id !== favId) : [...prev, favId]);
+  };
 
   useEffect(() => {
     localStorage.setItem('doggy_iptv_limit', iptvLimit.toString());
@@ -1437,13 +1446,17 @@ export default function App() {
             <div className="absolute inset-0 z-30 bg-theme-bg overflow-y-auto p-6 scroll-smooth">
               <div className="iptv-grid">
                 {(iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries)
-                  .filter(s => (selectedCategoryId === 'all' || s.category_id === selectedCategoryId))
+                  .filter(s => {
+                    if (selectedCategoryId === 'all') return true;
+                    if (selectedCategoryId === 'favorites') return favorites.includes(`${iptvType}-${s.id}`);
+                    return s.category_id === selectedCategoryId;
+                  })
                   .filter(s => s.name.toLowerCase().includes(iptvSearch.toLowerCase()))
                   .slice(0, iptvLimit)
                   .map(item => (
                     <div 
                       key={`${iptvType}-${item.id}`}
-                      className="iptv-card"
+                      className="iptv-card group relative"
                       onClick={() => {
                         if (iptvType === 'series') {
                           fetchSeriesInfo(item);
@@ -1459,6 +1472,16 @@ export default function App() {
                         }
                       }}
                     >
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(`${iptvType}-${item.id}`);
+                        }}
+                        className="absolute top-2 right-2 z-10 p-1.5 bg-black/50 rounded-full hover:bg-black/80 transition-all opacity-0 group-hover:opacity-100"
+                        title="Toggle Favorite"
+                      >
+                        <Heart size={16} className={favorites.includes(`${iptvType}-${item.id}`) ? "fill-theme-accent text-theme-accent" : "text-white"} />
+                      </button>
                       <img 
                         src={item.icon} 
                         alt="" 
@@ -1773,14 +1796,26 @@ export default function App() {
         {/* Pro Sidebar - Vertical icon bar */}
         <div className="w-16 border-r border-theme-border flex flex-col items-center py-6 gap-6 bg-theme-bg shrink-0">
           <div 
-            onClick={() => setSidebarMode('files')}
+            onClick={() => {
+              if (sidebarMode === 'files' && showPlaylist) setShowPlaylist(false);
+              else {
+                setSidebarMode('files');
+                setShowPlaylist(true);
+              }
+            }}
             className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'files' ? 'text-theme-accent bg-theme-bg-tertiary' : 'text-theme-text-muted hover:text-theme-text'}`}
             title={t.files}
           >
             <FileVideo size={24} />
           </div>
           <div 
-            onClick={() => setSidebarMode('iptv')}
+            onClick={() => {
+              if (sidebarMode === 'iptv' && showPlaylist) setShowPlaylist(false);
+              else {
+                setSidebarMode('iptv');
+                setShowPlaylist(true);
+              }
+            }}
             className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'iptv' ? 'text-theme-accent bg-theme-bg-tertiary' : 'text-theme-text-muted hover:text-theme-text'}`}
             title={t.iptv}
           >
@@ -1809,9 +1844,6 @@ export default function App() {
              <h2 className="text-sm font-black uppercase tracking-widest text-theme-text-muted">
                 {sidebarMode === 'files' ? t.playlist : t.iptv}
              </h2>
-             <button onClick={() => setShowPlaylist(false)} className="text-theme-text-muted hover:text-theme-text">
-                <X size={18} />
-             </button>
           </div>
 
 
@@ -1913,6 +1945,12 @@ export default function App() {
                           className={`iptv-category-item ${selectedCategoryId === 'all' ? 'active' : ''}`}
                        >
                           All Categories
+                       </div>
+                       <div 
+                          onClick={() => setSelectedCategoryId('favorites')}
+                          className={`iptv-category-item ${selectedCategoryId === 'favorites' ? 'active' : ''} flex items-center gap-2`}
+                       >
+                          <Heart size={14} className={selectedCategoryId === 'favorites' ? "fill-current text-theme-accent" : "text-theme-text-muted"} /> Favorites
                        </div>
                        {iptvCategories.map(cat => (
                           <div 
