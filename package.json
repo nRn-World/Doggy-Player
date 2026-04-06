@@ -1,9 +1,12 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "Doggy Video Player",
-  "author": "nRn World",
+  "author": {
+    "name": "nRn World",
+    "email": "bynrnworld@gmail.com"
+  },
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
