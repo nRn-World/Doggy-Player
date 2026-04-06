@@ -353,17 +353,25 @@ export default function App() {
   };
 
   const handleActivationLogin = async () => {
-    const creds = ACTIVATION_CODES[activationCode.trim()];
-    if (creds) {
-      setXtreamUrl(creds.url);
-      setXtreamUser(creds.user);
-      setXtreamPass(creds.pass);
-      handleXtreamLogin(false, creds.url, creds.user, creds.pass);
-      return;
-    }
-    
+    if (!activationCode.trim()) return;
     setIsIptvLoading(true);
+    
     try {
+      // First check local hardcoded codes
+      const creds = ACTIVATION_CODES[activationCode.trim()];
+      if (creds) {
+        setXtreamUrl(creds.url);
+        setXtreamUser(creds.user);
+        setXtreamPass(creds.pass);
+        localStorage.setItem('doggy_xtream_url', creds.url);
+        localStorage.setItem('doggy_xtream_user', creds.user);
+        localStorage.setItem('doggy_xtream_pass', creds.pass);
+        // We set mode FIRST to ensure UI is ready for the data
+        setIptvMode('xtream');
+        await handleXtreamLogin(false, creds.url, creds.user, creds.pass);
+        return;
+      }
+      
       const res = await fetch(`https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${activationCode.trim()}`);
       if (res.ok) {
         const data = await res.json();
@@ -371,13 +379,17 @@ export default function App() {
           setXtreamUrl(data.url);
           setXtreamUser(data.user);
           setXtreamPass(data.pass);
-          handleXtreamLogin(false, data.url, data.user, data.pass);
+          localStorage.setItem('doggy_xtream_url', data.url);
+          localStorage.setItem('doggy_xtream_user', data.user);
+          localStorage.setItem('doggy_xtream_pass', data.pass);
+          setIptvMode('xtream');
+          await handleXtreamLogin(false, data.url, data.user, data.pass);
           return;
         }
       }
       alert("Invalid Activation Code or not found.");
     } catch (e) {
-      alert("Network error checking code");
+      alert("Network error checking activation code.");
     } finally {
       setIsIptvLoading(false);
     }
@@ -439,6 +451,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('doggy_iptv_mode', iptvMode);
   }, [iptvMode]);
+  
+  // Update state when Xtream login is successful
+  const updateXtreamState = (url: string, user: string, pass: string) => {
+    setXtreamUrl(url);
+    setXtreamUser(user);
+    setXtreamPass(pass);
+  };
 
   // Validate on mount
   useEffect(() => {
@@ -536,26 +555,35 @@ export default function App() {
       
       if (data.user_info && data.user_info.auth === 1) {
         setIsIptvLogged(true);
+        // Important: Use direct values to avoid waiting for state update in this function
+        const urlToUse = uUrl;
+        const userToUse = uUser;
+        const passToUse = uPass;
+
+        setXtreamUrl(urlToUse);
+        setXtreamUser(userToUse);
+        setXtreamPass(passToUse);
+
         if (!isAuto) {
-          localStorage.setItem('doggy_xtream_url', uUrl);
-          localStorage.setItem('doggy_xtream_user', uUser);
-          localStorage.setItem('doggy_xtream_pass', uPass);
+          localStorage.setItem('doggy_xtream_url', urlToUse);
+          localStorage.setItem('doggy_xtream_user', userToUse);
+          localStorage.setItem('doggy_xtream_pass', passToUse);
         }
-        
+
         // Fetch LIVE
-        const streamData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_live_streams`);
+        const streamData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_live_streams`);
         if (Array.isArray(streamData)) {
           setIptvStreams(streamData.map((s: any) => ({
             id: s.stream_id,
             name: s.name,
             icon: s.stream_icon,
             category_id: s.category_id,
-            url: `${baseUrl}/live/${uUser}/${uPass}/${s.stream_id}.m3u8` 
+            url: `${baseUrl}/live/${userToUse}/${passToUse}/${s.stream_id}.m3u8` 
           })));
         }
 
         // Fetch MOVIES (VOD)
-        const movieData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_vod_streams`);
+        const movieData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_vod_streams`);
         if (Array.isArray(movieData)) {
           setIptvMovies(movieData.map((m: any) => ({
             id: m.stream_id,
@@ -563,35 +591,37 @@ export default function App() {
             icon: m.stream_icon,
             category_id: m.category_id,
             ext: m.container_extension || 'mkv',
-            url: `${baseUrl}/movie/${uUser}/${uPass}/${m.stream_id}.${m.container_extension || 'mkv'}`
+            url: `${baseUrl}/movie/${userToUse}/${passToUse}/${m.stream_id}.${m.container_extension || 'mkv'}`
           })));
         }
 
         // Fetch SERIES
-        const seriesData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_series`);
+        const seriesData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_series`);
         if (Array.isArray(seriesData)) {
           setIptvSeries(seriesData.map((s: any) => ({
             id: s.series_id,
             name: s.name,
             icon: s.cover || s.stream_icon || "",
             category_id: s.category_id,
-            url: `${baseUrl}/series/${uUser}/${uPass}/${s.series_id}.mkv`
+            url: `${baseUrl}/series/${userToUse}/${passToUse}/${s.series_id}.mkv`
           })));
         }
 
         // Fetch Categories
         const [liveCats, movieCats, seriesCats] = await Promise.all([
-          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_live_categories`),
-          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_vod_categories`),
-          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${uUser}&password=${uPass}&action=get_series_categories`)
+          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_live_categories`),
+          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_vod_categories`),
+          ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_series_categories`)
         ]);
 
         if (Array.isArray(liveCats)) setIptvLiveCategories(liveCats.map((c: any) => ({ id: c.category_id, name: c.category_name })));
         if (Array.isArray(movieCats)) setIptvMovieCategories(movieCats.map((c: any) => ({ id: c.category_id, name: c.category_name })));
         if (Array.isArray(seriesCats)) setIptvSeriesCategories(seriesCats.map((c: any) => ({ id: c.category_id, name: c.category_name })));
         
-        // Initial setup for Live categories
-        setIptvCategories(Array.isArray(liveCats) ? liveCats.map((c: any) => ({ id: c.category_id, name: c.category_name })) : []);
+        // Initial setup for Live categories (default)
+        if (iptvType === 'live' && Array.isArray(liveCats)) {
+           setIptvCategories(liveCats.map((c: any) => ({ id: c.category_id, name: c.category_name })));
+        }
       } else {
         if (!isAuto) alert("Login failed. Check your credentials.");
       }
@@ -2328,6 +2358,35 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Code Generation Modal */}
+      {showCodeModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
+          <div className="bg-theme-bg border border-theme-border rounded-2xl w-full max-w-sm overflow-hidden flex flex-col relative shadow-2xl">
+             <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary">
+               <h2 className="text-sm font-black uppercase text-theme-text-muted">Create Activation Code</h2>
+               <button onClick={() => setShowCodeModal(false)} className="text-theme-text-muted hover:text-theme-text"><X size={18}/></button>
+             </div>
+             <div className="p-6 space-y-4">
+                 <p className="text-xs text-theme-text-muted">Välj en 4-siffrig kod som kopplas till din inloggning. Ge koden till en vän, så kan de logga in automatiskt!</p>
+                 <div className="flex justify-center">
+                    <input 
+                      type="text" 
+                      maxLength={4} 
+                      placeholder="0000" 
+                      value={generateCode} 
+                      onChange={(e) => setGenerateCode(e.target.value.replace(/[^0-9]/g, ''))}
+                      className="w-32 bg-theme-bg-secondary border border-theme-border rounded-lg px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] text-theme-accent focus:ring-2 focus:ring-theme-accent outline-none" 
+                    />
+                 </div>
+                 <button onClick={handleCreateCode} disabled={isGenerating || generateCode.length !== 4} className="w-full bg-theme-accent hover:bg-emerald-400 text-black font-black py-3 rounded-xl active:scale-95 transition-all text-sm uppercase disabled:opacity-50 disabled:active:scale-100">
+                    {isGenerating ? "Sparar..." : "Save Code"}
+                 </button>
+             </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
