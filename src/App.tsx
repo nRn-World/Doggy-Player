@@ -259,17 +259,22 @@ export default function App() {
       const fileName = filePath.split('\\').pop() || filePath.split('/').pop() || 'Video';
       
       setPlaylist(prev => {
+        // Kontrollera om filen redan finns i listan (för att undvika dubbletter vid start)
+        const exists = prev.find(p => p.url === fileUrl);
+        if (exists) {
+          const existingIndex = prev.indexOf(exists);
+          setCurrentIndex(existingIndex);
+          setIsPlaying(true);
+          return prev;
+        }
+
         const newItems = [{
           id: Math.random().toString(36).substring(2, 9),
           name: fileName,
           url: fileUrl
         }];
         
-        if (prev.length === 0) {
-          setCurrentIndex(0);
-        } else {
-          setCurrentIndex(prev.length);
-        }
+        setCurrentIndex(prev.length);
         setIsPlaying(true);
         setCurrentTime(0);
         setZoomRect(null);
