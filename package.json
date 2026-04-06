@@ -1,7 +1,7 @@
 {
   "name": "doggy-player",
   "private": true,
-  "version": "1.1.9",
+  "version": "1.1.10",
   "description": "Doggy Video Player",
   "author": {
     "name": "nRn World",
@@ -58,7 +58,7 @@
       "output": "release"
     },
     "win": {
-      "icon": "Logo Bilder/icon.png",
+      "icon": "Logo Bilder/logoW-cropped-no-bg2.png",
       "artifactName": "Doggy-Player-Setup-${version}.${ext}",
       "target": [
         "nsis",
@@ -66,7 +66,7 @@
       ]
     },
     "mac": {
-      "icon": "Logo Bilder/icon.png",
+      "icon": "Logo Bilder/logoW-cropped-no-bg2.png",
       "category": "public.app-category.video",
       "artifactName": "Doggy-Player-${version}.${ext}",
       "target": [
@@ -75,7 +75,7 @@
       ]
     },
     "linux": {
-      "icon": "Logo Bilder/icon.png",
+      "icon": "Logo Bilder/logoW-cropped-no-bg2.png",
       "category": "Video",
       "artifactName": "Doggy-Player-${version}.${ext}",
       "target": [
@@ -110,7 +110,7 @@
       "dist/**/*",
       "electron/**/*",
       "Logo Bilder/logomp4.mp4",
-      "Logo Bilder/icon.png"
+      "Logo Bilder/logoW-cropped-no-bg2.png"
     ],
     "publish": {
       "provider": "github",
