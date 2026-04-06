@@ -357,6 +357,8 @@ export default function App() {
     setIsIptvLoading(true);
     
     try {
+      const { ipcRenderer } = (window as any).require('electron');
+      
       // First check local hardcoded codes
       const creds = ACTIVATION_CODES[activationCode.trim()];
       if (creds) {
@@ -366,30 +368,27 @@ export default function App() {
         localStorage.setItem('doggy_xtream_url', creds.url);
         localStorage.setItem('doggy_xtream_user', creds.user);
         localStorage.setItem('doggy_xtream_pass', creds.pass);
-        // We set mode FIRST to ensure UI is ready for the data
         setIptvMode('xtream');
         await handleXtreamLogin(false, creds.url, creds.user, creds.pass);
+        setIsIptvLoading(false);
         return;
       }
       
-      const res = await fetch(`https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${activationCode.trim()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.url && data.user && data.pass) {
-          setXtreamUrl(data.url);
-          setXtreamUser(data.user);
-          setXtreamPass(data.pass);
-          localStorage.setItem('doggy_xtream_url', data.url);
-          localStorage.setItem('doggy_xtream_user', data.user);
-          localStorage.setItem('doggy_xtream_pass', data.pass);
-          setIptvMode('xtream');
-          await handleXtreamLogin(false, data.url, data.user, data.pass);
-          return;
-        }
+      const data = await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${activationCode.trim()}`);
+      if (data && data.url && data.user && data.pass) {
+        setXtreamUrl(data.url);
+        setXtreamUser(data.user);
+        setXtreamPass(data.pass);
+        localStorage.setItem('doggy_xtream_url', data.url);
+        localStorage.setItem('doggy_xtream_user', data.user);
+        localStorage.setItem('doggy_xtream_pass', data.pass);
+        setIptvMode('xtream');
+        await handleXtreamLogin(false, data.url, data.user, data.pass);
+        return;
       }
       alert("Invalid Activation Code or not found.");
     } catch (e) {
-      alert("Network error checking activation code.");
+      alert("Invalid Activation Code or not found.");
     } finally {
       setIsIptvLoading(false);
     }
@@ -399,13 +398,29 @@ export default function App() {
     if (!generateCode || generateCode.length !== 4) return alert("Code must be 4 digits");
     setIsGenerating(true);
     try {
-       await fetch(`https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`, {
-         method: 'POST',
-         body: JSON.stringify({ url: xtreamUrl, user: xtreamUser, pass: xtreamPass })
+       const { ipcRenderer } = (window as any).require('electron');
+       
+       // Spara koden via ipcBridge med PUT (viktigt för kvdb.io att sätta specifika keys)
+       await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`, {
+         method: 'PUT',
+         body: { url: xtreamUrl, user: xtreamUser, pass: xtreamPass }
        });
-       alert(`Code ${generateCode} is nu aktiv!\nDu kan nu logga in med koden.`);
-       setShowCodeModal(false);
-    } catch {
+       
+       // Verifiera att den sparades
+       try {
+         const verify = await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`);
+         if (verify && verify.url) {
+            alert(`Code ${generateCode} is nu aktiv!\nDu kan nu logga in med koden.`);
+            setShowCodeModal(false);
+            return;
+         }
+       } catch (e) {
+         console.error("Verification error:", e);
+       }
+       
+       alert("Failed to confirm code activation. Please try again.");
+    } catch (err) {
+       console.error("Save code error:", err);
        alert("Failed to save code. Check connection.");
     } finally {
        setIsGenerating(false);

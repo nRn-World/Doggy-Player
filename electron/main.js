@@ -119,19 +119,30 @@ ipcMain.on('restart-and-install', () => {
 });
 
 // IPTV Fetch Bridge - Bypasses CORS and Mixed Content issues
-ipcMain.handle('iptv-fetch', async (event, url) => {
+ipcMain.handle('iptv-fetch', async (event, url, options = {}) => {
   try {
-    const response = await fetch(url, {
+    const fetchOptions = {
+      method: options.method || 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
+        ...options.headers
       }
-    });
+    };
+
+    if (options.body) {
+      fetchOptions.body = options.body;
+      if (typeof options.body === 'object') {
+        fetchOptions.body = JSON.stringify(options.body);
+        fetchOptions.headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    const response = await fetch(url, fetchOptions);
     
     if (!response.ok) {
+      // Return 404/error status to renderer so it can handle it
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
