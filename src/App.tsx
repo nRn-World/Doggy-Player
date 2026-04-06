@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -341,22 +341,62 @@ export default function App() {
   const [iptvMode, setIptvMode] = useState<'xtream' | 'm3u' | 'code'>(() => (localStorage.getItem('doggy_iptv_mode') as 'xtream' | 'm3u' | 'code') || 'code');
   const [iptvType, setIptvType] = useState<'live' | 'movie' | 'series'>('live');
   
+  
   // Activation
   const [activationCode, setActivationCode] = useState('');
+  const [showCodeModal, setShowCodeModal] = useState(false);
+  const [generateCode, setGenerateCode] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
   
   const ACTIVATION_CODES: Record<string, { url: string; user: string; pass: string }> = {
     "6923": { url: "http://premiumtest.tr:8080", user: "hBHCQDmz", pass: "ggY6RMm" }
   };
 
-  const handleActivationLogin = () => {
+  const handleActivationLogin = async () => {
     const creds = ACTIVATION_CODES[activationCode.trim()];
     if (creds) {
       setXtreamUrl(creds.url);
       setXtreamUser(creds.user);
       setXtreamPass(creds.pass);
       handleXtreamLogin(false, creds.url, creds.user, creds.pass);
-    } else {
-      alert("Invalid Activation Code");
+      return;
+    }
+    
+    setIsIptvLoading(true);
+    try {
+      const res = await fetch(`https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${activationCode.trim()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.url && data.user && data.pass) {
+          setXtreamUrl(data.url);
+          setXtreamUser(data.user);
+          setXtreamPass(data.pass);
+          handleXtreamLogin(false, data.url, data.user, data.pass);
+          return;
+        }
+      }
+      alert("Invalid Activation Code or not found.");
+    } catch (e) {
+      alert("Network error checking code");
+    } finally {
+      setIsIptvLoading(false);
+    }
+  };
+
+  const handleCreateCode = async () => {
+    if (!generateCode || generateCode.length !== 4) return alert("Code must be 4 digits");
+    setIsGenerating(true);
+    try {
+       await fetch(`https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`, {
+         method: 'POST',
+         body: JSON.stringify({ url: xtreamUrl, user: xtreamUser, pass: xtreamPass })
+       });
+       alert(`Code ${generateCode} is nu aktiv!\nDu kan nu logga in med koden.`);
+       setShowCodeModal(false);
+    } catch {
+       alert("Failed to save code. Check connection.");
+    } finally {
+       setIsGenerating(false);
     }
   };
   
@@ -1376,6 +1416,25 @@ export default function App() {
     };
   }
 
+  // Memoized filter for IPTVs arrays
+  const filteredIptvItems = useMemo(() => {
+    if (iptvMode !== 'xtream') return [];
+    const list = iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries;
+    const searchLower = iptvSearch.toLowerCase();
+    
+    return list.filter(s => {
+      if (selectedCategoryId !== 'all') {
+        if (selectedCategoryId === 'favorites') {
+          if (!favorites.includes(`${iptvType}-${s.id}`)) return false;
+        } else if (s.category_id !== selectedCategoryId) {
+          return false;
+        }
+      }
+      if (searchLower && !s.name.toLowerCase().includes(searchLower)) return false;
+      return true;
+    });
+  }, [iptvType, iptvStreams, iptvMovies, iptvSeries, selectedCategoryId, favorites, iptvSearch, iptvMode]);
+
   return (
     <div 
       className={`flex h-screen bg-theme-bg text-theme-text font-sans select-none overflow-hidden theme-${theme}`} 
@@ -1467,13 +1526,7 @@ export default function App() {
           sidebarMode === 'iptv' && isIptvLogged ? (
             <div className="absolute inset-0 z-30 bg-theme-bg overflow-y-auto p-6 scroll-smooth">
               <div className="iptv-grid">
-                {(iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries)
-                  .filter(s => {
-                    if (selectedCategoryId === 'all') return true;
-                    if (selectedCategoryId === 'favorites') return favorites.includes(`${iptvType}-${s.id}`);
-                    return s.category_id === selectedCategoryId;
-                  })
-                  .filter(s => s.name.toLowerCase().includes(iptvSearch.toLowerCase()))
+                {filteredIptvItems
                   .slice(0, iptvLimit)
                   .map(item => (
                     <div 
@@ -1961,6 +2014,13 @@ export default function App() {
                           {type}
                         </button>
                       ))}
+                    </div>
+
+                    <div className="p-2 bg-theme-bg/30 border-b border-theme-border flex justify-between items-center px-4">
+                        <span className="text-[10px] font-black uppercase text-theme-text-muted">Account: {xtreamUser}</span>
+                        <button onClick={() => setShowCodeModal(true)} className="bg-theme-accent/20 hover:bg-theme-accent/40 text-theme-accent text-[10px] font-black uppercase px-2 py-1.5 rounded transition-colors flex items-center gap-1">
+                           <Key size={12} /> Share Code
+                        </button>
                     </div>
 
                     <div className="p-3 bg-theme-bg/10">
