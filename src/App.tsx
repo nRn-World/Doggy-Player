@@ -1489,8 +1489,12 @@ export default function App() {
 
   // Memoized filter for IPTVs arrays
   const filteredIptvItems = useMemo(() => {
-    if (iptvMode !== 'xtream') return [];
-    const list = iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries;
+    // For M3U mode, all content is in iptvStreams (no separate movies/series lists)
+    // For Xtream mode, pick the right list per tab
+    const list = iptvMode === 'm3u'
+      ? iptvStreams
+      : (iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries);
+
     const searchLower = iptvSearch.toLowerCase();
     
     return list.filter(s => {
@@ -1504,7 +1508,7 @@ export default function App() {
       if (searchLower && !s.name.toLowerCase().includes(searchLower)) return false;
       return true;
     });
-  }, [iptvType, iptvStreams, iptvMovies, iptvSeries, selectedCategoryId, favorites, iptvSearch, iptvMode]);
+  }, [iptvMode, iptvType, iptvStreams, iptvMovies, iptvSeries, selectedCategoryId, favorites, iptvSearch]);
 
   return (
     <div 
