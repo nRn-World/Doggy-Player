@@ -1,86 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
-  sv: {
-    settings: "Inställningar",
-    language: "Språk",
-    playback: "Uppspelning",
-    autoplay: "Autoplay",
-    repeat: "Upprepa",
-    shortcuts: "Tangentbordsgenvägar",
-    showShortcuts: "Visa genvägar",
-    about: "Om",
-    version: "Version",
-    playlist: "Spellista",
-    hidePlaylist: "Dölj spellista",
-    togglePlaylist: "Växla spellista",
-    dropFiles: "Dra och släpp en eller flera videofiler här för att börja titta, eller klicka på knappen nedan för att bläddra.",
-    chooseFiles: "Välj videofiler",
-    dropPlaylist: "Dra och släpp videofiler här för att skapa en spellista",
-    scPlayPause: "Spela/Pausa (Håll för slow-mo)",
-    scStop: "Stopp",
-    scFullscreen: "Helskärm",
-    scMute: "Tyst",
-    scVolUp: "Höj volym",
-    scVolDown: "Sänk volym",
-    scForward: "Spola framåt 10s",
-    scBackward: "Spola bakåt 10s",
-    scFastForward: "Snabbspola (1.5x)",
-    scFastForward2x: "Snabbspola (2.0x)",
-    scZoomIn: "Zooma in",
-    scZoomOut: "Zooma ut",
-    scResetZoom: "Återställ zoom",
-    scRotateRight: "Rotera höger",
-    scRotateLeft: "Rotera vänster",
-    scRotate180: "Rotera 180°",
-    scRotate0: "Återställ rotation",
-    copied: "Kopierad!",
-    copyEmail: "Kopiera e-post",
-    rememberVolume: "Kom ihåg volym",
-    muteOnStart: "Ljudlös vid start",
-    defaultSpeed: "Standardhastighet",
-    resumePlayback: "Återuppta uppspelning",
-    appearance: "Utseende",
-    theme: "Tema",
-    themeBrown: "Brun (Standard)",
-    themeDark: "Mörk",
-    themeLight: "Ljus",
-    autoHideControls: "Dölj kontroller automatiskt",
-    autoHideNever: "Aldrig",
-    autoHide2s: "Efter 2 sekunder",
-    autoHide5s: "Efter 5 sekunder",
-    playlistSettings: "Spellista",
-    autoRemoveFinished: "Ta bort färdigspelade videor",
-    play: "Spela upp",
-    pause: "Pausa",
-    stop: "Stoppa",
-    previous: "Föregående",
-    nextVideo: "Nästa Video",
-    exitApp: "Avsluta",
-    fullscreen: "Helskärm",
-    windowscreen: "Fönsterläge",
-    iptv: "IPTV",
-    files: "Filer",
-    login: "Logga in",
-    url: "Server URL",
-    username: "Användarnamn",
-    password: "Lösenord",
-    connect: "Anslut",
-    categories: "Kategorier",
-    searching: "Söker...",
-    noChannels: "Inga kanaler hittades",
-    logout: "Logga ut",
-    streams: "Streams",
-    all: "Alla",
-    searchPlaceholder: "Sök kanal...",
-    iptvLoginRequired: "Vänligen logga in för att se IPTV-kanaler.",
-    live: "Live TV",
-    movies: "Filmer",
-    series: "Serier"
-  },
   en: {
     settings: "Settings",
     language: "Language",
@@ -94,7 +17,7 @@ const translations = {
     playlist: "Playlist",
     hidePlaylist: "Hide playlist",
     togglePlaylist: "Toggle playlist",
-    dropFiles: "Drag and drop one or more video files here to start watching, or click the button below to browse.",
+    dropFiles: "Drag and drop one or more video files here to start watching.",
     chooseFiles: "Choose video files",
     dropPlaylist: "Drag and drop video files here to create a playlist",
     scPlayPause: "Play/Pause (Hold for slow-mo)",
@@ -106,14 +29,8 @@ const translations = {
     scForward: "Forward 10s",
     scBackward: "Backward 10s",
     scFastForward: "Fast forward (1.5x)",
-    scFastForward2x: "Fast forward (2.0x)",
     scZoomIn: "Zoom in",
     scZoomOut: "Zoom out",
-    scResetZoom: "Reset zoom",
-    scRotateRight: "Rotate right",
-    scRotateLeft: "Rotate left",
-    scRotate180: "Rotate 180°",
-    scRotate0: "Reset rotation",
     copied: "Copied!",
     copyEmail: "Copy email",
     rememberVolume: "Remember volume",
@@ -126,9 +43,6 @@ const translations = {
     themeDark: "Dark",
     themeLight: "Light",
     autoHideControls: "Auto-hide controls",
-    autoHideNever: "Never",
-    autoHide2s: "After 2 seconds",
-    autoHide5s: "After 5 seconds",
     playlistSettings: "Playlist",
     autoRemoveFinished: "Auto-remove finished videos",
     play: "Play",
@@ -152,11 +66,89 @@ const translations = {
     logout: "Logout",
     streams: "Streams",
     all: "All",
-    searchPlaceholder: "Search channel...",
+    searchPlaceholder: "Search...",
     iptvLoginRequired: "Please login to view IPTV channels.",
     live: "Live TV",
     movies: "Movies",
-    series: "Series"
+    series: "Series",
+    itemsPerPage: "Channels per page",
+    seasons: "Seasons",
+    episodes: "Episodes",
+    loadingInfo: "Loading...",
+    allCategories: "All Categories"
+  },
+  sv: {
+    settings: "Inställningar",
+    language: "Språk",
+    playback: "Uppspelning",
+    autoplay: "Autoplay",
+    repeat: "Upprepa",
+    shortcuts: "Tangentbordsgenvägar",
+    showShortcuts: "Visa genvägar",
+    about: "Om",
+    version: "Version",
+    playlist: "Spellista",
+    hidePlaylist: "Dölj spellista",
+    togglePlaylist: "Växla spellista",
+    dropFiles: "Dra och släpp videofiler här för att börja titta.",
+    chooseFiles: "Välj videofiler",
+    dropPlaylist: "Dra och släpp för att skapa spellista",
+    scPlayPause: "Spela/Pausa (Håll för slow-mo)",
+    scStop: "Stopp",
+    scFullscreen: "Helskärm",
+    scMute: "Tyst",
+    scVolUp: "Höj volym",
+    scVolDown: "Sänk volym",
+    scForward: "Framåt 10s",
+    scBackward: "Bakåt 10s",
+    scFastForward: "Snabbspola (1.5x)",
+    scZoomIn: "Zooma in",
+    scZoomOut: "Zooma ut",
+    copied: "Kopierad!",
+    copyEmail: "Kopiera e-post",
+    rememberVolume: "Kom ihåg volym",
+    muteOnStart: "Ljudlös vid start",
+    defaultSpeed: "Standardhastighet",
+    resumePlayback: "Återuppta uppspelning",
+    appearance: "Utseende",
+    theme: "Tema",
+    themeBrown: "Brun (Standard)",
+    themeDark: "Mörk",
+    themeLight: "Ljus",
+    autoHideControls: "Dölj kontroller",
+    playlistSettings: "Spellista",
+    autoRemoveFinished: "Ta bort spelade",
+    play: "Spela upp",
+    pause: "Pausa",
+    stop: "Stoppa",
+    previous: "Föregående",
+    nextVideo: "Nästa Video",
+    exitApp: "Avsluta",
+    fullscreen: "Helskärm",
+    windowscreen: "Fönsterläge",
+    iptv: "IPTV",
+    files: "Filer",
+    login: "Logga in",
+    url: "Server URL",
+    username: "Användarnamn",
+    password: "Lösenord",
+    connect: "Anslut",
+    categories: "Kategorier",
+    searching: "Söker...",
+    noChannels: "Inga hittades",
+    logout: "Logga ut",
+    streams: "Strömmar",
+    all: "Alla",
+    searchPlaceholder: "Sök...",
+    iptvLoginRequired: "Vänligen logga in för IPTV.",
+    live: "Live TV",
+    movies: "Filmer",
+    series: "Serier",
+    itemsPerPage: "Kanaler per sida",
+    seasons: "Säsonger",
+    episodes: "Avsnitt",
+    loadingInfo: "Laddar...",
+    allCategories: "Alla Kategorier"
   }
 };
 
@@ -368,6 +360,13 @@ export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | 'all'>('all');
   const [iptvSearch, setIptvSearch] = useState('');
   const [isIptvLoading, setIsIptvLoading] = useState(false);
+  const [iptvLimit, setIptvLimit] = useState(() => parseInt(localStorage.getItem('doggy_iptv_limit') || '100'));
+  const [selectedSeriesInfo, setSelectedSeriesInfo] = useState<any>(null);
+  const [isSeriesInfoLoading, setIsSeriesInfoLoading] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('doggy_iptv_limit', iptvLimit.toString());
+  }, [iptvLimit]);
 
   useEffect(() => {
     localStorage.setItem('doggy_iptv_mode', iptvMode);
@@ -382,7 +381,6 @@ export default function App() {
     }
   }, []);
 
-  // Update categories when switching between Live, Movies, and Series
   useEffect(() => {
     if (iptvMode !== 'xtream') return;
     if (iptvType === 'live') setIptvCategories(iptvLiveCategories);
@@ -390,6 +388,21 @@ export default function App() {
     else if (iptvType === 'series') setIptvCategories(iptvSeriesCategories);
     setSelectedCategoryId('all');
   }, [iptvType, iptvLiveCategories, iptvMovieCategories, iptvSeriesCategories, iptvMode]);
+
+  const fetchSeriesInfo = async (series: any) => {
+    if (!series || !series.id) return;
+    setIsSeriesInfoLoading(true);
+    try {
+      const baseUrl = xtreamUrl.endsWith('/') ? xtreamUrl.slice(0, -1) : xtreamUrl;
+      const { ipcRenderer } = (window as any).require('electron');
+      const data = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${xtreamUser}&password=${xtreamPass}&action=get_series_info&series_id=${series.id}`);
+      setSelectedSeriesInfo({ ...series, episodes: data.episodes || {} });
+    } catch (e) {
+      console.error("Fetch series info error:", e);
+    } finally {
+      setIsSeriesInfoLoading(false);
+    }
+  };
 
   async function handleM3ULogin(isAuto = false) {
     if (!m3uUrl) return;
@@ -1353,26 +1366,133 @@ export default function App() {
         onDoubleClick={toggleFullscreen}
         onContextMenu={handleContextMenu}
       >
-        {!videoSrc ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
-            <div className="flex flex-col items-center max-w-md w-full mx-4 text-center">
-              <div className="w-full max-w-[448px] h-auto mb-8 flex items-center justify-center">
-                <CustomLogo size={448} className="opacity-90 object-contain" />
-              </div>
-              
-              <p className="text-theme-text-muted mb-8 text-sm leading-relaxed">
-                {t.dropFiles}
-              </p>
-              
-              <label className="cursor-pointer bg-theme-primary hover:bg-theme-hover text-white px-6 py-2.5 rounded-md font-medium text-sm transition-colors flex items-center gap-2 shadow-sm">
-                <FileVideo size={18} />
-                <span>{t.chooseFiles}</span>
-                <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.webm,.ogg,.ogv,.3gp,.vob,.ts,.m2ts,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg,.m4v,.hevc,.av1,video/mp2t" multiple className="hidden" onChange={handleFileChange} />
-              </label>
+        {/* Series Info Overlay */}
+        {selectedSeriesInfo && (
+          <div className="absolute inset-0 z-50 bg-theme-bg/95 flex flex-col backdrop-blur-md">
+            <div className="p-6 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary/50">
+               <div className="flex items-center gap-6">
+                  <button onClick={() => setSelectedSeriesInfo(null)} className="p-2 hover:bg-theme-bg-tertiary rounded-full transition-colors text-theme-accent">
+                    <SkipBack size={28} />
+                  </button>
+                  <div className="flex flex-col">
+                    <h2 className="text-2xl font-black text-white">{selectedSeriesInfo.name}</h2>
+                    <p className="text-xs text-theme-text-muted uppercase tracking-widest font-bold">Series Details</p>
+                  </div>
+               </div>
+               <button onClick={() => setSelectedSeriesInfo(null)} className="text-theme-text-muted hover:text-white transition-colors">
+                  <X size={24} />
+               </button>
+            </div>
+
+            <div className="flex-1 flex overflow-hidden">
+               {/* Seasons */}
+               <div className="w-1/4 border-r border-theme-border flex flex-col bg-black/20">
+                  <div className="p-4 text-[10px] font-black text-theme-text-muted uppercase tracking-widest">Seasons</div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                    {/* Assuming Season 1 for simplicity or map keys if multiple seasons */}
+                     {Object.keys(selectedSeriesInfo.episodes).map(seasonNum => (
+                        <div key={seasonNum} className="p-4 bg-theme-bg-secondary border border-theme-border rounded-xl text-sm font-bold text-center cursor-pointer hover:border-theme-accent transition-all">
+                           Season {seasonNum}
+                        </div>
+                     ))}
+                  </div>
+               </div>
+
+               {/* Episodes */}
+               <div className="flex-1 flex flex-col">
+                  <div className="p-4 text-[10px] font-black text-theme-text-muted uppercase tracking-widest">Episodes</div>
+                  <div className="flex-1 overflow-y-auto p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                     {(Object.values(selectedSeriesInfo.episodes)[0] as any[] || []).map((ep: any) => (
+                        <div 
+                          key={ep.id}
+                          className="p-4 bg-theme-bg-secondary border border-theme-border rounded-xl flex items-center justify-between group hover:border-theme-accent cursor-pointer transition-all"
+                          onClick={() => {
+                            const baseUrl = xtreamUrl.endsWith('/') ? xtreamUrl.slice(0, -1) : xtreamUrl;
+                            const newItem = {
+                              id: `series-ep-${ep.id}`,
+                              name: `${selectedSeriesInfo.name} - ${ep.title}`,
+                              url: `${baseUrl}/series/${xtreamUser}/${xtreamPass}/${ep.id}.${ep.container_extension || 'mkv'}`
+                            };
+                            setPlaylist([newItem]);
+                            setCurrentIndex(0);
+                            setIsPlaying(true);
+                            setSelectedSeriesInfo(null);
+                          }}
+                        >
+                           <div className="flex flex-col">
+                              <span className="text-sm font-bold group-hover:text-theme-accent transition-colors">{ep.title}</span>
+                              <span className="text-[10px] text-theme-text-muted">Part {ep.episode_num}</span>
+                           </div>
+                           <Play size={18} className="text-theme-text-muted group-hover:text-theme-accent transition-colors" />
+                        </div>
+                     ))}
+                  </div>
+               </div>
             </div>
           </div>
+        )}
+
+        {!videoSrc ? (
+          sidebarMode === 'iptv' && isIptvLogged ? (
+            <div className="absolute inset-0 z-30 bg-theme-bg overflow-y-auto p-6 scroll-smooth">
+              <div className="iptv-grid">
+                {(iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries)
+                  .filter(s => (selectedCategoryId === 'all' || s.category_id === selectedCategoryId))
+                  .filter(s => s.name.toLowerCase().includes(iptvSearch.toLowerCase()))
+                  .slice(0, iptvLimit)
+                  .map(item => (
+                    <div 
+                      key={`${iptvType}-${item.id}`}
+                      className="iptv-card"
+                      onClick={() => {
+                        if (iptvType === 'series') {
+                          fetchSeriesInfo(item);
+                        } else {
+                          const newItem = {
+                            id: `iptv-${iptvType}-${item.id}`,
+                            name: item.name,
+                            url: item.url
+                          };
+                          setPlaylist([newItem]);
+                          setCurrentIndex(0);
+                          setIsPlaying(true);
+                        }
+                      }}
+                    >
+                      <img 
+                        src={item.icon} 
+                        alt="" 
+                        loading="lazy"
+                        onError={(e) => { (e.target as any).src = "https://images.unsplash.com/photo-1594909122845-11baa439b7ea?w=200&h=300&fit=crop"; }}
+                      />
+                      <div className="iptv-card-overlay">
+                        {iptvType === 'live' && <div className="iptv-live-dot mb-1" />}
+                        <h3 className="iptv-card-title">{item.name}</h3>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center bg-black">
+              <div className="flex flex-col items-center max-w-md w-full mx-4 text-center">
+                <div className="w-full max-w-[320px] h-auto mb-8 flex items-center justify-center opacity-80">
+                  <CustomLogo size={320} className="object-contain" />
+                </div>
+                <p className="text-theme-text-muted mb-8 text-sm leading-relaxed px-4">
+                  {t.dropFiles}
+                </p>
+                <label className="cursor-pointer bg-theme-accent hover:opacity-90 text-black px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center gap-2 shadow-xl active:scale-95">
+                  <FileVideo size={18} />
+                  <span>{t.chooseFiles}</span>
+                  <input type="file" accept="video/*,.mkv,.avi" multiple className="hidden" onChange={handleFileChange} />
+                </label>
+              </div>
+            </div>
+          )
         ) : (
           <>
+             {/* Video section ... */}
             <video
               ref={videoRef}
               src={isHlsStream(videoSrc) ? undefined : (videoSrc || undefined)}
@@ -1647,31 +1767,53 @@ export default function App() {
       </div>
       </div>
       
-      {/* Playlist Sidebar */}
-      <div className={`bg-theme-bg-secondary flex flex-col shrink-0 z-20 transition-all duration-300 ease-in-out overflow-hidden ${(showPlaylist && !isFullscreen) ? 'w-80 border-l border-theme-border' : 'w-0 border-none'}`}>
-        <div className="w-80 h-full flex flex-col">
-          {/* Sidebar Tabs */}
-          <div className="flex border-b border-theme-border">
-            <button 
-              onClick={() => setSidebarMode('files')}
-              className={`flex-1 py-4 text-xs font-bold uppercase tracking-widest transition-all ${sidebarMode === 'files' ? 'text-theme-primary border-b-2 border-theme-primary bg-theme-primary/5' : 'text-theme-text-muted hover:text-theme-text'}`}
-            >
-              {t.files}
-            </button>
-            <button 
-              onClick={() => setSidebarMode('iptv')}
-              className={`flex-1 py-4 text-xs font-bold uppercase tracking-widest transition-all ${sidebarMode === 'iptv' ? 'text-theme-primary border-b-2 border-theme-primary bg-theme-primary/5' : 'text-theme-text-muted hover:text-theme-text'}`}
-            >
-              {t.iptv}
-            </button>
-            <button 
-              onClick={() => setShowPlaylist(false)}
-              className="px-4 text-theme-text-muted hover:text-theme-text"
-              title={t.hidePlaylist}
-            >
-              <X size={16} />
-            </button>
+      {/* Playlist & IPTV Sidebar (Redesigned) */}
+      <div className={`bg-theme-bg-secondary flex shrink-0 z-20 transition-all duration-300 ease-in-out overflow-hidden ${(showPlaylist && !isFullscreen) ? 'w-[320px] border-l border-theme-border' : 'w-0 border-none'}`}>
+        
+        {/* Pro Sidebar - Vertical icon bar */}
+        <div className="w-16 border-r border-theme-border flex flex-col items-center py-6 gap-6 bg-theme-bg shrink-0">
+          <div 
+            onClick={() => setSidebarMode('files')}
+            className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'files' ? 'text-theme-accent bg-theme-bg-tertiary' : 'text-theme-text-muted hover:text-theme-text'}`}
+            title={t.files}
+          >
+            <FileVideo size={24} />
           </div>
+          <div 
+            onClick={() => setSidebarMode('iptv')}
+            className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'iptv' ? 'text-theme-accent bg-theme-bg-tertiary' : 'text-theme-text-muted hover:text-theme-text'}`}
+            title={t.iptv}
+          >
+            <Monitor size={24} />
+          </div>
+          <div 
+            onClick={() => setShowSettingsModal(true)}
+            className="cursor-pointer transition-colors p-2 text-theme-text-muted hover:text-theme-text"
+            title={t.settings}
+          >
+            <Settings size={24} />
+          </div>
+
+          <div className="mt-auto mb-2">
+             {isIptvLogged && (
+               <button onClick={() => setIsIptvLogged(false)} className="text-theme-text-muted hover:text-red-400 p-2" title={t.logout}>
+                 <LogOut size={22} />
+               </button>
+             )}
+          </div>
+        </div>
+
+        {/* Categories / Playlist Column */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
+          <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary/50">
+             <h2 className="text-sm font-black uppercase tracking-widest text-theme-text-muted">
+                {sidebarMode === 'files' ? t.playlist : t.iptv}
+             </h2>
+             <button onClick={() => setShowPlaylist(false)} className="text-theme-text-muted hover:text-theme-text">
+                <X size={18} />
+             </button>
+          </div>
+
 
           <div className="flex-1 overflow-hidden flex flex-col">
             {sidebarMode === 'files' ? (
@@ -1702,177 +1844,86 @@ export default function App() {
                 )}
               </div>
             ) : (
-              // IPTV MODE
-              <div className="flex-1 flex flex-col overflow-hidden">
+              // IPTV MODE - Categories & Types Redesigned
+              <div className="flex-1 flex flex-col overflow-hidden bg-theme-bg-secondary/40">
                 {!isIptvLogged ? (
                   <div className="p-5 space-y-4">
-                    {/* Mode Toggle */}
+                    {/* ... (Keep existing login UI logic but cleaner) ... */}
                     <div className="flex bg-theme-bg border border-theme-border rounded-xl p-1 mb-2">
-                       <button 
-                        onClick={() => setIptvMode('xtream')}
-                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${iptvMode === 'xtream' ? 'bg-theme-primary text-theme-primary-text shadow-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
-                      >
-                        Xtream
-                      </button>
-                      <button 
-                        onClick={() => setIptvMode('m3u')}
-                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${iptvMode === 'm3u' ? 'bg-theme-primary text-theme-primary-text shadow-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
-                      >
-                         M3U Link
-                      </button>
+                       <button onClick={() => setIptvMode('xtream')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${iptvMode === 'xtream' ? 'bg-theme-accent text-black outline-none' : 'text-theme-text-muted hover:text-theme-text'}`}>Xtream</button>
+                       <button onClick={() => setIptvMode('m3u')} className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-lg transition-all ${iptvMode === 'm3u' ? 'bg-theme-accent text-black outline-none' : 'text-theme-text-muted hover:text-theme-text'}`}>M3U Link</button>
                     </div>
 
                     {iptvMode === 'xtream' ? (
-                      <>
-                        <div className="space-y-1">
-                          <label className="text-[10px] uppercase font-bold text-theme-text-muted ml-1">{t.url}</label>
-                          <input 
-                            type="text" 
-                            placeholder="http://url:port"
-                            value={xtreamUrl}
-                            onChange={(e) => setXtreamUrl(e.target.value)}
-                            className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-sm text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] uppercase font-bold text-theme-text-muted ml-1">{t.username}</label>
-                          <input 
-                            type="text" 
-                            placeholder="..."
-                            value={xtreamUser}
-                            onChange={(e) => setXtreamUser(e.target.value)}
-                            className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-sm text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-[10px] uppercase font-bold text-theme-text-muted ml-1">{t.password}</label>
-                          <input 
-                            type="password" 
-                            placeholder="..."
-                            value={xtreamPass}
-                            onChange={(e) => setXtreamPass(e.target.value)}
-                            className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-sm text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => handleXtreamLogin()}
-                          disabled={isIptvLoading}
-                          className="w-full bg-theme-primary hover:bg-theme-hover text-theme-primary-text font-bold py-3 rounded-lg transition-all shadow-lg active:scale-95 disabled:opacity-50"
-                        >
-                          {isIptvLoading ? t.searching : t.connect}
-                        </button>
-                      </>
+                      <div className="space-y-3">
+                         <input type="text" placeholder="Server URL" value={xtreamUrl} onChange={(e) => setXtreamUrl(e.target.value)} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
+                         <input type="text" placeholder="Username" value={xtreamUser} onChange={(e) => setXtreamUser(e.target.value)} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
+                         <input type="password" placeholder="Password" value={xtreamPass} onChange={(e) => setXtreamPass(e.target.value)} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
+                         <button onClick={() => handleXtreamLogin()} className="w-full bg-theme-accent text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">{isIptvLoading ? t.searching : t.connect}</button>
+                      </div>
                     ) : (
-                      <>
-                        <div className="space-y-1">
-                          <label className="text-[10px] uppercase font-bold text-theme-text-muted ml-1">M3U Playlist URL</label>
-                          <input 
-                            type="text" 
-                            placeholder="https://.../playlist.m3u"
-                            value={m3uUrl}
-                            onChange={(e) => setM3uUrl(e.target.value)}
-                            className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-sm text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-primary"
-                          />
-                        </div>
-                        <button 
-                          onClick={() => handleM3ULogin()}
-                          disabled={isIptvLoading}
-                          className="w-full bg-theme-primary hover:bg-theme-hover text-theme-primary-text font-bold py-3 rounded-lg transition-all shadow-lg active:scale-95 disabled:opacity-50"
-                        >
-                          {isIptvLoading ? t.searching : t.connect}
-                        </button>
-                      </>
+                      <div className="space-y-3">
+                         <input type="text" placeholder="Playlist URL" value={m3uUrl} onChange={(e) => setM3uUrl(e.target.value)} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
+                         <button onClick={() => handleM3ULogin()} className="w-full bg-theme-accent text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">{isIptvLoading ? t.searching : t.connect}</button>
+                      </div>
                     )}
                   </div>
                 ) : (
                   <div className="flex-1 flex flex-col overflow-hidden">
-                    {/* Type Navigation (Live / Movie / Series) */}
-                    {iptvMode === 'xtream' && (
-                      <div className="flex px-3 pt-2 gap-1">
+                    {/* Mode Types */}
+                    <div className="flex gap-1 p-2 bg-theme-bg/30 border-b border-theme-border">
+                      {(['live', 'movie', 'series'] as const).map(type => (
                         <button 
-                          onClick={() => setIptvType('live')}
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded transition-colors ${iptvType === 'live' ? 'bg-theme-accent text-white' : 'bg-theme-bg-tertiary text-theme-text-muted hover:bg-theme-bg-tertiary/80'}`}
+                          key={type}
+                          onClick={() => setIptvType(type)}
+                          className={`flex-1 py-2 text-[10px] font-black rounded uppercase transition-all ${iptvType === type ? 'bg-theme-accent text-black shadow-lg scale-105' : 'bg-theme-bg-tertiary text-theme-text-muted hover:text-theme-text'}`}
                         >
-                          LIVE
+                          {type}
                         </button>
-                        <button 
-                          onClick={() => setIptvType('movie')}
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded transition-colors ${iptvType === 'movie' ? 'bg-theme-accent text-white' : 'bg-theme-bg-tertiary text-theme-text-muted hover:bg-theme-bg-tertiary/80'}`}
-                        >
-                          MOVIES
-                        </button>
-                        <button 
-                          onClick={() => setIptvType('series')}
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded transition-colors ${iptvType === 'series' ? 'bg-theme-accent text-white' : 'bg-theme-bg-tertiary text-theme-text-muted hover:bg-theme-bg-tertiary/80'}`}
-                        >
-                          SERIES
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Search & Categories */}
-                    <div className="p-3 border-b border-theme-border space-y-3">
-                      <input 
-                        type="text"
-                        placeholder={t.searchPlaceholder}
-                        value={iptvSearch}
-                        onChange={(e) => setIptvSearch(e.target.value)}
-                        className="w-full bg-theme-bg-tertiary border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:outline-none"
-                      />
-                      <select 
-                        value={selectedCategoryId}
-                        onChange={(e) => setSelectedCategoryId(e.target.value)}
-                        className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:outline-none"
-                      >
-                        <option value="all">{t.all} {t.categories}</option>
-                        {iptvCategories.map(cat => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
-                        ))}
-                      </select>
+                      ))}
                     </div>
 
-                    {/* Channels List */}
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1 iptv-channels-list">
-                      {(iptvType === 'live' ? iptvStreams : iptvType === 'movie' ? iptvMovies : iptvSeries)
-                        .filter(s => (selectedCategoryId === 'all' || s.category_id === selectedCategoryId))
-                        .filter(s => s.name.toLowerCase().includes(iptvSearch.toLowerCase()))
-                        .map(stream => (
-                          <div 
-                            key={`${iptvType}-${stream.id}`}
-                            style={{ contentVisibility: 'auto', containIntrinsicSize: '0 44px' } as any}
-                            onClick={() => {
-                              const newItem = {
-                                id: `iptv-${iptvType}-${stream.id}`,
-                                name: stream.name,
-                                url: stream.url
-                              };
-                              
-                              setPlaylist([newItem]);
-                              setCurrentIndex(0);
-                              setIsPlaying(true);
-                              setZoomRect(null);
-                              setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
-                            }}
-                            className="p-2 rounded-lg hover:bg-theme-bg-tertiary cursor-pointer flex items-center gap-3 group transition-all"
+                    <div className="p-3 bg-theme-bg/10">
+                       <div className="relative mb-3">
+                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-theme-text-muted" />
+                         <input 
+                            type="text" 
+                            placeholder={t.searchPlaceholder}
+                            value={iptvSearch}
+                            onChange={(e) => setIptvSearch(e.target.value)}
+                            className="w-full bg-theme-bg border border-theme-border rounded-lg pl-9 pr-3 py-2 text-xs focus:ring-1 focus:ring-theme-accent outline-none"
+                         />
+                       </div>
+
+                       <div className="flex items-center justify-between px-1">
+                          <span className="text-[10px] font-black text-theme-text-muted uppercase tracking-tighter">Render Limit</span>
+                          <select 
+                             value={iptvLimit}
+                             onChange={(e) => setIptvLimit(parseInt(e.target.value))}
+                             className="bg-theme-bg border border-theme-border rounded text-[10px] px-1.5 py-0.5 outline-none font-bold"
                           >
-                            <div className="w-10 h-10 rounded bg-black/20 flex items-center justify-center overflow-hidden shrink-0 border border-theme-border">
-                              {stream.icon ? (
-                                <img src={stream.icon} alt="" className="w-full h-full object-contain" onError={(e) => (e.currentTarget.style.display='none')} />
-                              ) : (
-                                <Film size={16} className="text-theme-text-muted" />
-                              )}
-                            </div>
-                            <span className="text-xs text-theme-text-muted group-hover:text-theme-text truncate font-medium">{stream.name}</span>
-                          </div>
-                        ))}
+                             {[50, 100, 200, 500, 1000].map(v => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                       </div>
                     </div>
-                    
-                    <button 
-                      onClick={handleLogoutIptv}
-                      className="p-3 text-[10px] uppercase font-bold text-theme-text-muted hover:text-theme-accent text-center border-t border-theme-border"
-                    >
-                      {t.logout}
-                    </button>
+
+                    <div className="flex-1 overflow-y-auto px-2 space-y-1 scroll-smooth py-2">
+                       <div 
+                          onClick={() => setSelectedCategoryId('all')}
+                          className={`iptv-category-item ${selectedCategoryId === 'all' ? 'active' : ''}`}
+                       >
+                          All Categories
+                       </div>
+                       {iptvCategories.map(cat => (
+                          <div 
+                             key={cat.id} 
+                             onClick={() => setSelectedCategoryId(cat.id)}
+                             className={`iptv-category-item ${selectedCategoryId === cat.id ? 'active' : ''}`}
+                          >
+                             {cat.name}
+                          </div>
+                       ))}
+                    </div>
                   </div>
                 )}
               </div>
