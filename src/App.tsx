@@ -341,13 +341,15 @@ export default function App() {
   const [iptvMode, setIptvMode] = useState<'xtream' | 'm3u' | 'code'>(() => (localStorage.getItem('doggy_iptv_mode') as 'xtream' | 'm3u' | 'code') || 'code');
   const [iptvType, setIptvType] = useState<'live' | 'movie' | 'series'>('live');
   
-  
   // Activation
   const [activationCode, setActivationCode] = useState('');
   const [showCodeModal, setShowCodeModal] = useState(false);
   const [generateCode, setGenerateCode] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // App key for keyvalue.immanuel.co - completely free, no signup needed
+  const KV_APP_KEY = 'bjlqbgku';
+
   const ACTIVATION_CODES: Record<string, { url: string; user: string; pass: string }> = {
     "6923": { url: "http://premiumtest.tr:8080", user: "hBHCQDmz", pass: "ggY6RMm" }
   };
@@ -359,7 +361,7 @@ export default function App() {
     try {
       const { ipcRenderer } = (window as any).require('electron');
       
-      // First check local hardcoded codes
+      // Check local hardcoded codes first
       const creds = ACTIVATION_CODES[activationCode.trim()];
       if (creds) {
         setXtreamUrl(creds.url);
@@ -374,20 +376,32 @@ export default function App() {
         return;
       }
       
-      const data = await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${activationCode.trim()}`);
-      if (data && data.url && data.user && data.pass) {
-        setXtreamUrl(data.url);
-        setXtreamUser(data.user);
-        setXtreamPass(data.pass);
-        localStorage.setItem('doggy_xtream_url', data.url);
-        localStorage.setItem('doggy_xtream_user', data.user);
-        localStorage.setItem('doggy_xtream_pass', data.pass);
-        setIptvMode('xtream');
-        await handleXtreamLogin(false, data.url, data.user, data.pass);
-        return;
+      // Fetch from keyvalue.immanuel.co
+      const raw = await ipcRenderer.invoke('iptv-fetch', `https://keyvalue.immanuel.co/api/KeyVal/GetValue/${KV_APP_KEY}/${activationCode.trim()}`);
+      
+      if (raw && typeof raw === 'string' && raw.trim() !== '') {
+        try {
+          // The value is stored as base64-encoded JSON
+          const decoded = atob(raw.replace(/"/g, '').trim());
+          const data = JSON.parse(decoded);
+          if (data && data.url && data.user && data.pass) {
+            setXtreamUrl(data.url);
+            setXtreamUser(data.user);
+            setXtreamPass(data.pass);
+            localStorage.setItem('doggy_xtream_url', data.url);
+            localStorage.setItem('doggy_xtream_user', data.user);
+            localStorage.setItem('doggy_xtream_pass', data.pass);
+            setIptvMode('xtream');
+            await handleXtreamLogin(false, data.url, data.user, data.pass);
+            return;
+          }
+        } catch (parseErr) {
+          console.error('Parse error:', parseErr);
+        }
       }
       alert("Invalid Activation Code or not found.");
     } catch (e) {
+      console.error('Activation error:', e);
       alert("Invalid Activation Code or not found.");
     } finally {
       setIsIptvLoading(false);
@@ -396,29 +410,25 @@ export default function App() {
 
   const handleCreateCode = async () => {
     if (!generateCode || generateCode.length !== 4) return alert("Code must be 4 digits");
+    if (!xtreamUrl || !xtreamUser || !xtreamPass) return alert("No IPTV account found. Please login with Xtream first.");
     setIsGenerating(true);
     try {
        const { ipcRenderer } = (window as any).require('electron');
        
-       // Spara koden via ipcBridge med PUT (viktigt för kvdb.io att sätta specifika keys)
-       await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`, {
-         method: 'PUT',
-         body: { url: xtreamUrl, user: xtreamUser, pass: xtreamPass }
-       });
+       // Encode the credentials as base64 JSON so it's URL-safe
+       const creds = JSON.stringify({ url: xtreamUrl, user: xtreamUser, pass: xtreamPass });
+       const encoded = btoa(creds);
        
-       // Verifiera att den sparades
-       try {
-         const verify = await ipcRenderer.invoke('iptv-fetch', `https://kvdb.io/P28y9qbhhU8VE7Ex33JFMt/${generateCode}`);
-         if (verify && verify.url) {
-            alert(`Code ${generateCode} is nu aktiv!\nDu kan nu logga in med koden.`);
-            setShowCodeModal(false);
-            return;
-         }
-       } catch (e) {
-         console.error("Verification error:", e);
+       // Store via keyvalue.immanuel.co - POST to UpdateValue/{appkey}/{key}/{value}
+       const result = await ipcRenderer.invoke('iptv-fetch', `https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/${KV_APP_KEY}/${generateCode}/${encoded}`);
+       
+       if (result === true || result === 'true' || result === 'True') {
+          alert(`✅ Kod ${generateCode} är nu aktiv!\n\nDu kan nu logga in med den koden i Code-fliken.`);
+          setShowCodeModal(false);
+          setGenerateCode('');
+       } else {
+          alert("Failed to save code. Please try again.");
        }
-       
-       alert("Failed to confirm code activation. Please try again.");
     } catch (err) {
        console.error("Save code error:", err);
        alert("Failed to save code. Check connection.");
