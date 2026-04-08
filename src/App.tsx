@@ -3111,6 +3111,7 @@ export default function App() {
               {/* Tangentbordsgenvägar */}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-theme-text">{t.shortcuts}</h3>
+                <button
                   onClick={() => setShowShortcutsModal(true)}
                   className="w-full bg-theme-primary hover:bg-theme-hover text-white font-medium py-2.5 px-4 rounded-lg transition-colors text-sm"
                 >
