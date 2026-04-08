@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload, Camera, SlidersHorizontal, Tv2 } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -39,6 +39,7 @@ const translations = {
     scRotateLeft: "Rotate left",
     scRotate180: "Rotate 180°",
     scRotate0: "Reset rotation",
+    scScreenshot: "Screenshot",
     copied: "Copied!",
     copyEmail: "Copy email",
     rememberVolume: "Remember volume",
@@ -55,6 +56,14 @@ const translations = {
     autoRemoveFinished: "Auto-remove finished videos",
     iptvQuality: "IPTV Default Quality",
     iptvQualityAuto: "Auto (Recommended)",
+    screenshotSaved: "Screenshot saved!",
+    equalizer: "Equalizer",
+    epg: "TV Guide",
+    epgUrl: "EPG URL",
+    epgNow: "Now",
+    epgNext: "Next",
+    epgNoData: "No guide data",
+    epgLoading: "Loading guide...",
     pause: "Pause",
     stop: "Stop",
     previous: "Previous",
@@ -121,6 +130,7 @@ const translations = {
     scRotateLeft: "Rotera vänster",
     scRotate180: "Rotera 180°",
     scRotate0: "Återställ rotation",
+    scScreenshot: "Skärmdump",
     copied: "Kopierad!",
     copyEmail: "Kopiera e-post",
     rememberVolume: "Kom ihåg volym",
@@ -137,6 +147,14 @@ const translations = {
     autoRemoveFinished: "Ta bort spelade",
     iptvQuality: "IPTV Standardkvalitet",
     iptvQualityAuto: "Auto (Rekommenderas)",
+    screenshotSaved: "Skärmdump sparad!",
+    equalizer: "Equalizer",
+    epg: "TV-tablå",
+    epgUrl: "EPG URL",
+    epgNow: "Nu",
+    epgNext: "Härnäst",
+    epgNoData: "Ingen tablådata",
+    epgLoading: "Laddar tablå...",
     play: "Spela upp",
     pause: "Pausa",
     stop: "Stoppa",
@@ -1270,6 +1288,149 @@ export default function App() {
     return subtitleCues.find(c => t >= c.start && t <= c.end) || null;
   }, [subtitleCues, currentTime, subtitleOffset]);
 
+  // ── Screenshot ──────────────────────────────────────────────────
+  const [screenshotFlash, setScreenshotFlash] = useState(false);
+
+  const takeScreenshot = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const link = document.createElement('a');
+    const name = playlist[currentIndex]?.name?.replace(/\.[^.]+$/, '') || 'screenshot';
+    link.download = `${name}_${formatTime(currentTime).replace(/:/g, '-')}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    setScreenshotFlash(true);
+    setTimeout(() => setScreenshotFlash(false), 600);
+  };
+
+  // ── Equalizer ───────────────────────────────────────────────────
+  const eqBassRef = useRef<BiquadFilterNode | null>(null);
+  const eqMidRef = useRef<BiquadFilterNode | null>(null);
+  const eqTrebleRef = useRef<BiquadFilterNode | null>(null);
+  const [showEqMenu, setShowEqMenu] = useState(false);
+  const eqMenuRef = useRef<HTMLDivElement>(null);
+  const [eqBass, setEqBass] = useState(0);
+  const [eqMid, setEqMid] = useState(0);
+  const [eqTreble, setEqTreble] = useState(0);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (eqMenuRef.current && !eqMenuRef.current.contains(e.target as Node)) setShowEqMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const initEqualizer = () => {
+    if (!audioCtxRef.current || !gainNodeRef.current) return;
+    if (eqBassRef.current) return; // already initialized
+    const ctx = audioCtxRef.current;
+    const bass = ctx.createBiquadFilter();
+    bass.type = 'lowshelf'; bass.frequency.value = 200;
+    const mid = ctx.createBiquadFilter();
+    mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = 1;
+    const treble = ctx.createBiquadFilter();
+    treble.type = 'highshelf'; treble.frequency.value = 4000;
+    // Reconnect: source → bass → mid → treble → gain → destination
+    // We insert between gainNode and destination
+    gainNodeRef.current.disconnect();
+    gainNodeRef.current.connect(bass);
+    bass.connect(mid);
+    mid.connect(treble);
+    treble.connect(ctx.destination);
+    eqBassRef.current = bass;
+    eqMidRef.current = mid;
+    eqTrebleRef.current = treble;
+  };
+
+  const applyEq = (band: 'bass' | 'mid' | 'treble', value: number) => {
+    initAudio();
+    initEqualizer();
+    if (band === 'bass') { setEqBass(value); if (eqBassRef.current) eqBassRef.current.gain.value = value; }
+    if (band === 'mid') { setEqMid(value); if (eqMidRef.current) eqMidRef.current.gain.value = value; }
+    if (band === 'treble') { setEqTreble(value); if (eqTrebleRef.current) eqTrebleRef.current.gain.value = value; }
+  };
+
+  const resetEq = () => { applyEq('bass', 0); applyEq('mid', 0); applyEq('treble', 0); };
+
+  // ── EPG ─────────────────────────────────────────────────────────
+  interface EpgProgram { start: number; end: number; title: string; desc?: string; }
+  interface EpgChannel { [channelId: string]: EpgProgram[]; }
+  const [epgData, setEpgData] = useState<EpgChannel>({});
+  const [epgUrl, setEpgUrl] = useState(() => localStorage.getItem('doggy_epg_url') || '');
+  const [epgLoading, setEpgLoading] = useState(false);
+  const [showEpgPanel, setShowEpgPanel] = useState(false);
+  const epgPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (epgPanelRef.current && !epgPanelRef.current.contains(e.target as Node)) setShowEpgPanel(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const loadEpg = async (url?: string) => {
+    const target = (url || epgUrl).trim();
+    if (!target) return;
+    setEpgLoading(true);
+    try {
+      const { ipcRenderer } = (window as any).require('electron');
+      const xml: string = await ipcRenderer.invoke('iptv-fetch', target);
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, 'text/xml');
+      const programmes = doc.querySelectorAll('programme');
+      const data: EpgChannel = {};
+      const parseTime = (s: string) => {
+        // Format: 20240101120000 +0000
+        const clean = s.replace(/\s.*/, '');
+        const y = clean.slice(0,4), mo = clean.slice(4,6), d = clean.slice(6,8);
+        const h = clean.slice(8,10), mi = clean.slice(10,12), sec = clean.slice(12,14);
+        return new Date(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`).getTime() / 1000;
+      };
+      programmes.forEach(p => {
+        const ch = p.getAttribute('channel') || '';
+        const start = parseTime(p.getAttribute('start') || '0');
+        const end = parseTime(p.getAttribute('stop') || '0');
+        const title = p.querySelector('title')?.textContent || '';
+        const desc = p.querySelector('desc')?.textContent || '';
+        if (!data[ch]) data[ch] = [];
+        data[ch].push({ start, end, title, desc });
+      });
+      setEpgData(data);
+      localStorage.setItem('doggy_epg_url', target);
+    } catch (e) {
+      console.error('EPG load error:', e);
+    } finally {
+      setEpgLoading(false);
+    }
+  };
+
+  // Auto-load EPG on mount if URL saved
+  useEffect(() => {
+    if (epgUrl) loadEpg(epgUrl);
+  }, []);
+
+  const getEpgForChannel = (channelName: string) => {
+    const now = Date.now() / 1000;
+    // Try to match by channel name (case-insensitive partial match)
+    const key = Object.keys(epgData).find(k =>
+      k.toLowerCase().includes(channelName.toLowerCase()) ||
+      channelName.toLowerCase().includes(k.toLowerCase())
+    );
+    if (!key) return null;
+    const programs = epgData[key];
+    const current = programs.find(p => now >= p.start && now < p.end);
+    const next = programs.find(p => p.start > now);
+    return { current, next };
+  };
+
   const spacePressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSlowMoActive = useRef(false);
   const preSlowMoState = useRef({ wasPlaying: false, rate: 1.0 });
@@ -1348,7 +1509,12 @@ export default function App() {
           }
           break;
         case 'KeyS':
-          stopVideo();
+          if (e.altKey) {
+            e.preventDefault();
+            takeScreenshot();
+          } else {
+            stopVideo();
+          }
           break;
         case 'ArrowRight':
           if (keysPressed.current['KeyR']) {
@@ -1901,6 +2067,12 @@ export default function App() {
                       <div className="iptv-card-overlay">
                         {iptvType === 'live' && <div className="iptv-live-dot mb-1" />}
                         <h3 className="iptv-card-title">{item.name}</h3>
+                        {iptvType === 'live' && (() => {
+                          const epg = getEpgForChannel(item.name);
+                          return epg?.current ? (
+                            <p className="text-[9px] text-white/70 mt-0.5 truncate">{epg.current.title}</p>
+                          ) : null;
+                        })()}
                       </div>
                     </div>
                   ))}
@@ -1920,22 +2092,6 @@ export default function App() {
                   <span>{t.chooseFiles}</span>
                   <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.vob,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg" multiple className="hidden" onChange={handleFileChange} />
                 </label>
-                <div className="flex items-center gap-2 mt-4 w-full max-w-sm">
-                  <input
-                    type="text"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleOpenUrl(); }}
-                    placeholder={t.openUrlPlaceholder}
-                    className="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-theme-accent"
-                  />
-                  <button
-                    onClick={handleOpenUrl}
-                    className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
-                  >
-                    {t.openUrl}
-                  </button>
-                </div>
               </div>
             </div>
           )
@@ -2211,6 +2367,57 @@ export default function App() {
               <Maximize size={20} />
             </button>
 
+            {/* Screenshot button */}
+            <button
+              onClick={takeScreenshot}
+              className={`transition-colors hover:text-theme-accent relative ${screenshotFlash ? 'text-theme-accent' : 'text-theme-text'}`}
+              title="Screenshot"
+            >
+              <Camera size={20} />
+            </button>
+
+            {/* Equalizer button */}
+            <div className="relative flex items-center" ref={eqMenuRef}>
+              <button
+                onClick={() => { initAudio(); setShowEqMenu(p => !p); }}
+                className={`transition-colors ${(eqBass !== 0 || eqMid !== 0 || eqTreble !== 0) ? 'text-theme-accent' : 'text-theme-text hover:text-theme-accent'}`}
+                title={t.equalizer}
+              >
+                <SlidersHorizontal size={20} />
+              </button>
+              {showEqMenu && (
+                <div className="absolute bottom-10 right-0 w-64 bg-theme-bg border border-theme-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="p-3 border-b border-theme-border flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-widest text-theme-text-muted">{t.equalizer}</span>
+                    {(eqBass !== 0 || eqMid !== 0 || eqTreble !== 0) && (
+                      <button onClick={resetEq} className="text-[10px] text-red-400 hover:text-red-300 font-bold uppercase">Reset</button>
+                    )}
+                  </div>
+                  {([
+                    { label: 'Bass', key: 'bass' as const, value: eqBass, freq: '200Hz' },
+                    { label: 'Mid', key: 'mid' as const, value: eqMid, freq: '1kHz' },
+                    { label: 'Treble', key: 'treble' as const, value: eqTreble, freq: '4kHz' },
+                  ]).map(({ label, key, value, freq }) => (
+                    <div key={key} className="px-4 py-3 border-b border-theme-border last:border-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-theme-text">{label}</span>
+                        <span className="text-[10px] text-theme-text-muted">{freq} · <span className={value !== 0 ? 'text-theme-accent font-bold' : ''}>{value > 0 ? '+' : ''}{value}dB</span></span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-theme-text-muted w-6">-12</span>
+                        <input
+                          type="range" min="-12" max="12" step="1" value={value}
+                          onChange={(e) => applyEq(key, parseInt(e.target.value))}
+                          className="flex-1 h-1 accent-theme-accent cursor-pointer"
+                        />
+                        <span className="text-[10px] text-theme-text-muted w-5">+12</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Subtitle button */}
             <div className="relative flex items-center" ref={subtitleMenuRef}>
               <button
@@ -2339,6 +2546,80 @@ export default function App() {
             >
               <ListVideo size={20} />
             </button>
+
+            {/* EPG button - only show when IPTV live is active */}
+            {isIptvLogged && iptvType === 'live' && (
+              <div className="relative flex items-center" ref={epgPanelRef}>
+                <button
+                  onClick={() => setShowEpgPanel(p => !p)}
+                  className={`transition-colors ${Object.keys(epgData).length > 0 ? 'text-theme-accent' : 'text-theme-text hover:text-theme-accent'}`}
+                  title={t.epg}
+                >
+                  <Tv2 size={20} />
+                </button>
+                {showEpgPanel && (
+                  <div className="absolute bottom-10 right-0 w-80 bg-theme-bg border border-theme-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="p-3 border-b border-theme-border flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-widest text-theme-text-muted">{t.epg}</span>
+                      {epgLoading && <div className="w-3 h-3 border-2 border-theme-accent/30 border-t-theme-accent rounded-full animate-spin" />}
+                    </div>
+                    {/* EPG URL input */}
+                    <div className="p-3 border-b border-theme-border space-y-2">
+                      <p className="text-[10px] text-theme-text-muted uppercase font-black tracking-widest">{t.epgUrl}</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={epgUrl}
+                          onChange={(e) => setEpgUrl(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') loadEpg(); }}
+                          placeholder="http://server.com/epg.xml"
+                          className="flex-1 bg-theme-bg-tertiary border border-theme-border rounded-lg px-2 py-1.5 text-xs text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                        />
+                        <button onClick={() => loadEpg()} className="bg-theme-accent text-black text-xs font-black px-3 py-1.5 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
+                          Load
+                        </button>
+                      </div>
+                    </div>
+                    {/* Current channel EPG */}
+                    {playlist[currentIndex] && (() => {
+                      const epg = getEpgForChannel(playlist[currentIndex].name);
+                      return (
+                        <div className="p-3 space-y-2 max-h-64 overflow-y-auto">
+                          {!epg ? (
+                            <p className="text-xs text-theme-text-muted text-center py-4">{Object.keys(epgData).length === 0 ? t.epgNoData : 'No data for this channel'}</p>
+                          ) : (
+                            <>
+                              {epg.current && (
+                                <div className="bg-theme-bg-tertiary rounded-lg p-3">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                    <span className="text-[10px] font-black uppercase text-red-400">{t.epgNow}</span>
+                                  </div>
+                                  <p className="text-sm font-bold text-theme-text">{epg.current.title}</p>
+                                  {epg.current.desc && <p className="text-[10px] text-theme-text-muted mt-1 line-clamp-2">{epg.current.desc}</p>}
+                                  <p className="text-[10px] text-theme-text-muted mt-1">
+                                    {new Date(epg.current.start * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} – {new Date(epg.current.end * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+                                  </p>
+                                </div>
+                              )}
+                              {epg.next && (
+                                <div className="bg-theme-bg-secondary rounded-lg p-3">
+                                  <span className="text-[10px] font-black uppercase text-theme-text-muted">{t.epgNext}</span>
+                                  <p className="text-sm font-bold text-theme-text mt-1">{epg.next.title}</p>
+                                  <p className="text-[10px] text-theme-text-muted mt-1">
+                                    {new Date(epg.next.start * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} – {new Date(epg.next.end * 1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
             <button 
               onClick={() => setShowSettingsModal(true)} 
               className="text-theme-text hover:text-theme-accent transition-colors"
@@ -2812,6 +3093,25 @@ export default function App() {
                 <p className="text-[11px] text-theme-text-muted bg-theme-bg-tertiary rounded-lg px-3 py-2">
                   ℹ️ Auto adjusts quality based on your connection speed. Manual selection applies when the stream supports that resolution.
                 </p>
+                <div className="space-y-1">
+                  <span className="text-sm text-theme-text">{t.epgUrl}</span>
+                  <p className="text-[11px] text-theme-text-muted">XML EPG URL for TV guide data (optional)</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={epgUrl}
+                      onChange={(e) => setEpgUrl(e.target.value)}
+                      placeholder="http://server.com/epg.xml"
+                      className="flex-1 bg-theme-bg border border-theme-border rounded-lg px-3 py-2 text-xs text-theme-text focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                    />
+                    <button onClick={() => { loadEpg(); setShowSettingsModal(false); }} className="bg-theme-accent text-black text-xs font-black px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
+                      Load
+                    </button>
+                  </div>
+                  {Object.keys(epgData).length > 0 && (
+                    <p className="text-[11px] text-theme-accent">✓ {Object.keys(epgData).length} channels loaded</p>
+                  )}
+                </div>
               </div>
 
               {/* Tangentbordsgenvägar */}
@@ -2880,6 +3180,7 @@ export default function App() {
                   { keys: ['R', '+', '←'], desc: t.scRotateLeft },
                   { keys: ['R', '+', '↑'], desc: t.scRotate180 },
                   { keys: ['R', '+', '↓', '/', '0'], desc: t.scRotate0 },
+                  { keys: ['Alt', '+', 'S'], desc: t.scScreenshot },
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between p-3 hover:bg-theme-bg-tertiary rounded-lg transition-colors">
                     <div className="flex items-center gap-1.5">
