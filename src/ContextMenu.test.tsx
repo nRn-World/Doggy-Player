@@ -18,6 +18,7 @@ const sv = {
 const baseProps = {
   x: 100, y: 100,
   isPlaying: false,
+  isFullscreen: false,
   hasMultipleVideos: false,
   t: en,
   onClose: vi.fn(),
@@ -27,6 +28,7 @@ const baseProps = {
   onNext: vi.fn(),
   onSettings: vi.fn(),
   onPlaylist: vi.fn(),
+  onFullscreen: vi.fn(),
   onExit: vi.fn(),
 };
 
@@ -34,7 +36,7 @@ function setup(overrides = {}) {
   const props = { ...baseProps, ...overrides,
     onClose: vi.fn(), onPlayPause: vi.fn(), onStop: vi.fn(),
     onPrevious: vi.fn(), onNext: vi.fn(), onSettings: vi.fn(),
-    onPlaylist: vi.fn(), onExit: vi.fn(),
+    onPlaylist: vi.fn(), onFullscreen: vi.fn(), onExit: vi.fn(),
   };
   render(<ContextMenu {...props} />);
   return props;

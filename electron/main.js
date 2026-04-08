@@ -19,7 +19,7 @@ if (!gotTheLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
       
-      const fileArg = commandLine.find(arg => arg.match(/\.(mp4|mkv|avi|mov|webm)$/i));
+      const fileArg = commandLine.find(arg => arg.match(/\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ogg|ogv|3gp|vob|ts|m2ts|rm|rmvb|divx|xvid|mpeg|mpg)$/i));
       if (fileArg) {
         mainWindow.webContents.executeJavaScript(`
           window.__initialVideoInfo = ${JSON.stringify(fileArg)};
@@ -92,7 +92,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('did-finish-load', () => {
-    const fileArg = process.argv.find(arg => arg.match(/\.(mp4|mkv|avi|mov|webm)$/i));
+    const fileArg = process.argv.find(arg => arg.match(/\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ogg|ogv|3gp|vob|ts|m2ts|rm|rmvb|divx|xvid|mpeg|mpg)$/i));
     if (fileArg) {
       mainWindow.webContents.executeJavaScript(`
         window.__initialVideoInfo = ${JSON.stringify(fileArg)};

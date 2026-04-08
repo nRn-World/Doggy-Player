@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -19,6 +19,8 @@ const translations = {
     togglePlaylist: "Toggle playlist",
     dropFiles: "Drag and drop one or more video files here to start watching.",
     chooseFiles: "Choose video files",
+    openUrl: "Open URL",
+    openUrlPlaceholder: "Paste video or stream URL...",
     dropPlaylist: "Drag and drop video files here to create a playlist",
     scPlayPause: "Play/Pause (Hold for slow-mo)",
     scStop: "Stop",
@@ -29,8 +31,14 @@ const translations = {
     scForward: "Forward 10s",
     scBackward: "Backward 10s",
     scFastForward: "Fast forward (1.5x)",
+    scFastForward2x: "Fast forward (2.0x) - double tap",
     scZoomIn: "Zoom in",
     scZoomOut: "Zoom out",
+    scResetZoom: "Reset zoom",
+    scRotateRight: "Rotate right",
+    scRotateLeft: "Rotate left",
+    scRotate180: "Rotate 180°",
+    scRotate0: "Reset rotation",
     copied: "Copied!",
     copyEmail: "Copy email",
     rememberVolume: "Remember volume",
@@ -45,7 +53,8 @@ const translations = {
     autoHideControls: "Auto-hide controls",
     playlistSettings: "Playlist",
     autoRemoveFinished: "Auto-remove finished videos",
-    play: "Play",
+    iptvQuality: "IPTV Default Quality",
+    iptvQualityAuto: "Auto (Recommended)",
     pause: "Pause",
     stop: "Stop",
     previous: "Previous",
@@ -92,6 +101,8 @@ const translations = {
     togglePlaylist: "Växla spellista",
     dropFiles: "Dra och släpp videofiler här för att börja titta.",
     chooseFiles: "Välj videofiler",
+    openUrl: "Öppna URL",
+    openUrlPlaceholder: "Klistra in video- eller ström-URL...",
     dropPlaylist: "Dra och släpp för att skapa spellista",
     scPlayPause: "Spela/Pausa (Håll för slow-mo)",
     scStop: "Stopp",
@@ -102,8 +113,14 @@ const translations = {
     scForward: "Framåt 10s",
     scBackward: "Bakåt 10s",
     scFastForward: "Snabbspola (1.5x)",
+    scFastForward2x: "Snabbspola (2.0x) - dubbelklick",
     scZoomIn: "Zooma in",
     scZoomOut: "Zooma ut",
+    scResetZoom: "Återställ zoom",
+    scRotateRight: "Rotera höger",
+    scRotateLeft: "Rotera vänster",
+    scRotate180: "Rotera 180°",
+    scRotate0: "Återställ rotation",
     copied: "Kopierad!",
     copyEmail: "Kopiera e-post",
     rememberVolume: "Kom ihåg volym",
@@ -118,6 +135,8 @@ const translations = {
     autoHideControls: "Dölj kontroller",
     playlistSettings: "Spellista",
     autoRemoveFinished: "Ta bort spelade",
+    iptvQuality: "IPTV Standardkvalitet",
+    iptvQualityAuto: "Auto (Rekommenderas)",
     play: "Spela upp",
     pause: "Pausa",
     stop: "Stoppa",
@@ -209,10 +228,19 @@ export default function App() {
         });
         hls.loadSource(videoSrc);
         hls.attachMedia(videoRef.current);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+          const levels = data.levels.map((l: any) => ({ height: l.height || 0, bitrate: l.bitrate || 0 }));
+          setHlsLevels(levels);
+          setHlsCurrentLevel(-1);
+          // Apply default quality from settings (-1 = auto)
+          hls.currentLevel = defaultHlsQuality;
+          setHlsQuality(defaultHlsQuality);
           if (isPlaying && videoRef.current) {
             videoRef.current.play().catch(() => {});
           }
+        });
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+          setHlsCurrentLevel(data.level);
         });
         hlsRef.current = hls;
 
@@ -314,6 +342,39 @@ export default function App() {
   });
   const [autoHideControls, setAutoHideControls] = useState(() => parseInt(localStorage.getItem('cinelens_autoHideControls') || '0', 10));
   const [autoRemoveFinished, setAutoRemoveFinished] = useState(() => localStorage.getItem('cinelens_autoRemoveFinished') === 'true');
+  const [defaultHlsQuality, setDefaultHlsQuality] = useState<number>(() => parseInt(localStorage.getItem('cinelens_defaultHlsQuality') || '-1', 10));
+
+  // HLS quality
+  const [hlsLevels, setHlsLevels] = useState<{ height: number; bitrate: number }[]>([]);
+  const [hlsQuality, setHlsQuality] = useState<number>(-1); // -1 = auto
+  const [hlsCurrentLevel, setHlsCurrentLevel] = useState<number>(-1);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const qualityMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+        setShowQualityMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const applyQuality = (level: number) => {
+    setHlsQuality(level);
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = level;
+    }
+    setShowQualityMenu(false);
+  };
+
+  const qualityLabel = (level: number) => {
+    if (level === -1) return 'Auto';
+    const l = hlsLevels[level];
+    if (!l) return `Level ${level}`;
+    return l.height > 0 ? `${l.height}p` : `${Math.round(l.bitrate / 1000)}k`;
+  };
 
   useEffect(() => {
     localStorage.setItem('cinelens_language', language);
@@ -333,6 +394,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('cinelens_theme', theme); }, [theme]);
   useEffect(() => { localStorage.setItem('cinelens_autoHideControls', autoHideControls.toString()); }, [autoHideControls]);
   useEffect(() => { localStorage.setItem('cinelens_autoRemoveFinished', autoRemoveFinished.toString()); }, [autoRemoveFinished]);
+  useEffect(() => { localStorage.setItem('cinelens_defaultHlsQuality', defaultHlsQuality.toString()); }, [defaultHlsQuality]);
 
   // ---------------------------------------------------------
   // IPTV State
@@ -340,6 +402,7 @@ export default function App() {
   const [sidebarMode, setSidebarMode] = useState<'files' | 'iptv'>('files');
   const [iptvMode, setIptvMode] = useState<'xtream' | 'm3u' | 'code'>(() => (localStorage.getItem('doggy_iptv_mode') as 'xtream' | 'm3u' | 'code') || 'code');
   const [iptvType, setIptvType] = useState<'live' | 'movie' | 'series'>('live');
+  const [m3uSubMode, setM3uSubMode] = useState<'playlist' | 'stream'>('playlist');
   
   // Activation
   const [activationCode, setActivationCode] = useState('');
@@ -354,30 +417,25 @@ export default function App() {
     "6923": { url: "http://premiumtest.tr:8080", user: "hBHCQDmz", pass: "ggY6RMm" }
   };
 
-  // Helper: encode JSON to URL-safe base64 (replaces + and / which break URL paths)
+  // Helper: encode JSON to URL-safe base64
   const encodeForKV = (obj: object): string => {
     const json = JSON.stringify(obj);
     const b64 = btoa(unescape(encodeURIComponent(json)));
-    return b64.replace(/\+/g, '-').replace(/\//g, '-').replace(/=/g, '');
+    // Replace + with -, / with _ and strip = padding
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   };
 
   // Helper: decode URL-safe base64 back to object
   const decodeFromKV = (raw: string): any => {
     const cleaned = raw.replace(/"/g, '').trim();
+    // Restore standard base64: - → +, _ → /
     const padLen = (4 - (cleaned.length % 4)) % 4;
-    const padded = cleaned + '='.repeat(padLen);
-    // Restore standard base64 chars (we used - for both + and /)
-    // Since we replaced both + and / with -, we need to try both
+    const padded = cleaned.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padLen);
     try {
-      const json = decodeURIComponent(escape(atob(padded.replace(/-/g, '+'))));
+      const json = decodeURIComponent(escape(atob(padded)));
       return JSON.parse(json);
     } catch {
-      try {
-        const json = decodeURIComponent(escape(atob(padded.replace(/-/g, '/'))));
-        return JSON.parse(json);
-      } catch {
-        return null;
-      }
+      return null;
     }
   };
 
@@ -387,8 +445,6 @@ export default function App() {
     
     try {
       const { ipcRenderer } = (window as any).require('electron');
-      
-      // Check local hardcoded codes first
       const creds = ACTIVATION_CODES[activationCode.trim()];
       if (creds) {
         setXtreamUrl(creds.url); setXtreamUser(creds.user); setXtreamPass(creds.pass);
@@ -461,7 +517,7 @@ export default function App() {
   // M3U
   const [m3uUrl, setM3uUrl] = useState(() => localStorage.getItem('doggy_m3u_url') || '');
 
-  const [isIptvLogged, setIsIptvLogged] = useState(false);
+  const [isIptvLogged, setIsIptvLogged] = useState(() => localStorage.getItem('doggy_iptv_logged') === 'true');
   const [iptvCategories, setIptvCategories] = useState<{id: string, name: string}[]>([]);
   const [iptvLiveCategories, setIptvLiveCategories] = useState<{id: string, name: string}[]>([]);
   const [iptvMovieCategories, setIptvMovieCategories] = useState<{id: string, name: string}[]>([]);
@@ -490,21 +546,26 @@ export default function App() {
   }, [iptvLimit]);
 
   useEffect(() => {
+    localStorage.setItem('doggy_iptv_logged', isIptvLogged.toString());
+  }, [isIptvLogged]);
+
+  useEffect(() => {
     localStorage.setItem('doggy_iptv_mode', iptvMode);
   }, [iptvMode]);
   
-  // Update state when Xtream login is successful
-  const updateXtreamState = (url: string, user: string, pass: string) => {
-    setXtreamUrl(url);
-    setXtreamUser(user);
-    setXtreamPass(pass);
-  };
-
-  // Validate on mount
+  // Validate on mount - restore session immediately, refresh data in background
   useEffect(() => {
     if (iptvMode === 'xtream' && xtreamUrl && xtreamUser && xtreamPass) {
+      // If already marked as logged in, restore immediately without waiting for network
+      if (localStorage.getItem('doggy_iptv_logged') === 'true') {
+        setIsIptvLogged(true);
+      }
+      // Always refresh channel data in background
       handleXtreamLogin(true);
     } else if (iptvMode === 'm3u' && m3uUrl) {
+      if (localStorage.getItem('doggy_iptv_logged') === 'true') {
+        setIsIptvLogged(true);
+      }
       handleM3ULogin(true);
     }
   }, []);
@@ -570,7 +631,8 @@ export default function App() {
       setIptvStreams(streams);
       setIptvCategories(Array.from(cats).map(c => ({ id: c, name: c })));
       setIsIptvLogged(true);
-      if (!isAuto) localStorage.setItem('doggy_m3u_url', m3uUrl);
+      // Always save M3U URL to keep session persistent
+      localStorage.setItem('doggy_m3u_url', m3uUrl);
     } catch (e) {
       console.error("M3U Load Error:", e);
       if (!isAuto) alert("Failed to load M3U playlist. " + (e instanceof Error ? e.message : "Network error."));
@@ -605,11 +667,10 @@ export default function App() {
         setXtreamUser(userToUse);
         setXtreamPass(passToUse);
 
-        if (!isAuto) {
-          localStorage.setItem('doggy_xtream_url', urlToUse);
-          localStorage.setItem('doggy_xtream_user', userToUse);
-          localStorage.setItem('doggy_xtream_pass', passToUse);
-        }
+        // Always save credentials to keep session persistent across restarts and updates
+        localStorage.setItem('doggy_xtream_url', urlToUse);
+        localStorage.setItem('doggy_xtream_user', userToUse);
+        localStorage.setItem('doggy_xtream_pass', passToUse);
 
         // Fetch LIVE
         const streamData = await ipcRenderer.invoke('iptv-fetch', `${baseUrl}/player_api.php?username=${userToUse}&password=${passToUse}&action=get_live_streams`);
@@ -677,9 +738,18 @@ export default function App() {
     setIsIptvLogged(false);
     setIptvCategories([]);
     setIptvStreams([]);
+    setIptvMovies([]);
+    setIptvSeries([]);
+    setIptvLiveCategories([]);
+    setIptvMovieCategories([]);
+    setIptvSeriesCategories([]);
+    setSelectedCategoryId('all');
+    setIptvSearch('');
+    localStorage.removeItem('doggy_iptv_logged');
     localStorage.removeItem('doggy_xtream_url');
     localStorage.removeItem('doggy_xtream_user');
     localStorage.removeItem('doggy_xtream_pass');
+    localStorage.removeItem('doggy_m3u_url');
   }
 
   const [emailCopied, setEmailCopied] = useState(false);
@@ -993,6 +1063,15 @@ export default function App() {
         setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
         rotationRef.current = 0;
         setRotation(0);
+      } else {
+        // Switch to first newly added file
+        setCurrentIndex(prev.length);
+        setIsPlaying(true);
+        setCurrentTime(0);
+        setZoomRect(null);
+        setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
+        rotationRef.current = 0;
+        setRotation(0);
       }
       return updated;
     });
@@ -1010,6 +1089,186 @@ export default function App() {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
   };
+
+  const [urlInput, setUrlInput] = useState('');
+
+  const handleOpenUrl = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    const name = url.split('/').pop()?.split('?')[0] || 'Stream';
+    const newItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      name,
+      url
+    };
+    setPlaylist(prev => {
+      const updated = [...prev, newItem];
+      setCurrentIndex(updated.length - 1);
+      setIsPlaying(true);
+      setCurrentTime(0);
+      setZoomRect(null);
+      setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
+      return updated;
+    });
+    setUrlInput('');
+  };
+
+  // ── Subtitle state ──────────────────────────────────────────────
+  interface SubCue { start: number; end: number; text: string; }
+  const [subtitleCues, setSubtitleCues] = useState<SubCue[]>([]);
+  const [subtitleOffset, setSubtitleOffset] = useState(0);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const subtitleMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close subtitle menu on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (subtitleMenuRef.current && !subtitleMenuRef.current.contains(e.target as Node)) {
+        setShowSubtitleMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Reset subtitles when video changes
+  useEffect(() => {
+    setSubtitleCues([]);
+    setSubtitleOffset(0);
+    setHlsLevels([]);
+    setHlsCurrentLevel(-1);
+  }, [videoSrc]);
+
+  const parseSRT = (text: string): SubCue[] => {
+    const cues: SubCue[] = [];
+    const blocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split(/\n\s*\n/);
+    const timeToSec = (t: string) => {
+      const [h, m, rest] = t.split(':');
+      const [s, ms] = rest.replace(',', '.').split('.');
+      return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseFloat('0.' + (ms || '0'));
+    };
+    for (const block of blocks) {
+      const lines = block.trim().split('\n');
+      const timeLine = lines.find(l => l.includes('-->'));
+      if (!timeLine) continue;
+      const [startStr, endStr] = timeLine.split('-->').map(s => s.trim());
+      const text = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+      if (text) cues.push({ start: timeToSec(startStr), end: timeToSec(endStr), text });
+    }
+    return cues;
+  };
+
+  const parseVTT = (text: string): SubCue[] => {
+    const cleaned = text.replace(/^WEBVTT.*\n?/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const timeToSec = (t: string) => {
+      const parts = t.split(':');
+      let h = 0, m = 0, s = 0;
+      if (parts.length === 3) { h = parseInt(parts[0]); m = parseInt(parts[1]); s = parseFloat(parts[2].replace(',', '.')); }
+      else { m = parseInt(parts[0]); s = parseFloat(parts[1].replace(',', '.')); }
+      return h * 3600 + m * 60 + s;
+    };
+    const cues: SubCue[] = [];
+    const blocks = cleaned.trim().split(/\n\s*\n/);
+    for (const block of blocks) {
+      const lines = block.trim().split('\n');
+      const timeLine = lines.find(l => l.includes('-->'));
+      if (!timeLine) continue;
+      const [startStr, endStr] = timeLine.split('-->').map(s => s.trim().split(' ')[0]);
+      const text = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+      if (text) cues.push({ start: timeToSec(startStr), end: timeToSec(endStr), text });
+    }
+    return cues;
+  };
+
+  // ASS/SSA parser
+  const parseASS = (text: string): SubCue[] => {
+    const cues: SubCue[] = [];
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const toSec = (t: string) => {
+      const [h, m, rest] = t.split(':');
+      const [s, cs] = rest.split('.');
+      return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseInt(cs || '0') / 100;
+    };
+    let formatLine: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith('Format:') && line.toLowerCase().includes('start')) {
+        formatLine = line.replace('Format:', '').split(',').map(s => s.trim().toLowerCase());
+      }
+      if (line.startsWith('Dialogue:')) {
+        const parts = line.replace('Dialogue:', '').split(',');
+        const startIdx = formatLine.indexOf('start');
+        const endIdx = formatLine.indexOf('end');
+        const textIdx = formatLine.indexOf('text');
+        if (startIdx < 0 || endIdx < 0) continue;
+        const start = toSec(parts[startIdx]?.trim() || '0:00:00.00');
+        const end = toSec(parts[endIdx]?.trim() || '0:00:00.00');
+        const rawText = parts.slice(textIdx >= 0 ? textIdx : 9).join(',')
+          .replace(/\{[^}]+\}/g, '').replace(/\\N/g, '\n').replace(/\\n/g, '\n').trim();
+        if (rawText) cues.push({ start, end, text: rawText });
+      }
+    }
+    return cues;
+  };
+
+  // MicroDVD .sub parser (frame-based, assumes 23.976 fps if no header)
+  const parseSUB = (text: string): SubCue[] => {
+    const cues: SubCue[] = [];
+    let fps = 23.976;
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    for (const line of lines) {
+      const fpsMatch = line.match(/^\{1\}\{1\}([\d.]+)/);
+      if (fpsMatch) { fps = parseFloat(fpsMatch[1]); continue; }
+      const match = line.match(/^\{(\d+)\}\{(\d+)\}(.+)/);
+      if (!match) continue;
+      const start = parseInt(match[1]) / fps;
+      const end = parseInt(match[2]) / fps;
+      const text = match[3].replace(/\|/g, '\n').replace(/\{[^}]+\}/g, '').trim();
+      if (text) cues.push({ start, end, text });
+    }
+    return cues;
+  };
+
+  // SAMI .smi parser
+  const parseSMI = (text: string): SubCue[] => {
+    const cues: SubCue[] = [];
+    const syncMatches = [...text.matchAll(/<SYNC[^>]+Start=["']?(\d+)["']?[^>]*>([\s\S]*?)(?=<SYNC|<\/BODY|$)/gi)];
+    for (let i = 0; i < syncMatches.length; i++) {
+      const start = parseInt(syncMatches[i][1]) / 1000;
+      const end = i + 1 < syncMatches.length ? parseInt(syncMatches[i + 1][1]) / 1000 : start + 3;
+      const raw = syncMatches[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
+      if (raw && raw !== '&nbsp;') cues.push({ start, end, text: raw });
+    }
+    return cues;
+  };
+
+  const loadSubtitleFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      let cues: SubCue[] = [];
+      if (ext === 'srt' || ext === 'txt') cues = parseSRT(text);
+      else if (ext === 'vtt') cues = parseVTT(text);
+      else if (ext === 'ass' || ext === 'ssa') cues = parseASS(text);
+      else if (ext === 'sub') cues = parseSUB(text);
+      else if (ext === 'smi') cues = parseSMI(text);
+      if (cues.length > 0) {
+        setSubtitleCues(cues);
+        setSubtitleOffset(0);
+        setShowSubtitleMenu(false);
+      } else {
+        alert('Could not parse subtitle file. Supported: .srt .vtt .ass .ssa .sub .smi .txt');
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  // Current subtitle cue
+  const currentCue = useMemo(() => {
+    if (!subtitleCues.length) return null;
+    const t = currentTime + subtitleOffset;
+    return subtitleCues.find(c => t >= c.start && t <= c.end) || null;
+  }, [subtitleCues, currentTime, subtitleOffset]);
 
   const spacePressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSlowMoActive = useRef(false);
@@ -1456,9 +1715,10 @@ export default function App() {
 
   const formatTime = (time: number) => {
     if (isNaN(time)) return "00:00";
-    const m = Math.floor(time / 60).toString().padStart(2, '0');
+    const h = Math.floor(time / 3600);
+    const m = Math.floor((time % 3600) / 60).toString().padStart(2, '0');
     const s = Math.floor(time % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
+    return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
   };
 
   // Dynamic Styles
@@ -1658,8 +1918,24 @@ export default function App() {
                 <label className="cursor-pointer bg-theme-accent hover:opacity-90 text-black px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center gap-2 shadow-xl active:scale-95">
                   <FileVideo size={18} />
                   <span>{t.chooseFiles}</span>
-                  <input type="file" accept="video/*,.mkv,.avi" multiple className="hidden" onChange={handleFileChange} />
+                  <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.vob,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg" multiple className="hidden" onChange={handleFileChange} />
                 </label>
+                <div className="flex items-center gap-2 mt-4 w-full max-w-sm">
+                  <input
+                    type="text"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleOpenUrl(); }}
+                    placeholder={t.openUrlPlaceholder}
+                    className="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-theme-accent"
+                  />
+                  <button
+                    onClick={handleOpenUrl}
+                    className="bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-white px-3 py-2 rounded-lg text-xs font-bold transition-colors whitespace-nowrap"
+                  >
+                    {t.openUrl}
+                  </button>
+                </div>
               </div>
             </div>
           )
@@ -1724,6 +2000,8 @@ export default function App() {
                       nextIndex = Math.max(0, newLength - 1);
                       shouldPlay = false;
                     }
+                  } else {
+                    nextIndex = currentIndex; // stay at same index, next item shifts down
                   }
                   
                   setPlaylist(prev => prev.filter((_, i) => i !== currentIndex));
@@ -1762,6 +2040,17 @@ export default function App() {
               }}
             />
             
+            {/* Subtitle overlay */}
+            {currentCue && (
+              <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none z-40 px-4">
+                <div
+                  className="text-white text-center text-lg font-semibold leading-snug px-4 py-1.5 rounded-lg"
+                  style={{ background: 'rgba(0,0,0,0.72)', textShadow: '0 1px 4px rgba(0,0,0,0.9)', maxWidth: '80%', whiteSpace: 'pre-line' }}
+                  dangerouslySetInnerHTML={{ __html: currentCue.text.replace(/\n/g, '<br/>') }}
+                />
+              </div>
+            )}
+
             {/* Selection Box */}
             {isSelecting && startPos && currentPos && (
               <div 
@@ -1921,6 +2210,128 @@ export default function App() {
             <button onClick={toggleFullscreen} className="hover:text-theme-accent transition-colors">
               <Maximize size={20} />
             </button>
+
+            {/* Subtitle button */}
+            <div className="relative flex items-center" ref={subtitleMenuRef}>
+              <button
+                onClick={() => setShowSubtitleMenu(p => !p)}
+                className={`transition-colors ${subtitleCues.length > 0 ? 'text-theme-accent' : 'text-theme-text hover:text-theme-accent'}`}
+                title="Subtitles"
+              >
+                <Captions size={20} />
+              </button>
+
+              {showSubtitleMenu && (
+                <div className="absolute bottom-10 right-0 w-72 bg-theme-bg border border-theme-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="p-3 border-b border-theme-border flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-widest text-theme-text-muted">Subtitles</span>
+                    {subtitleCues.length > 0 && (
+                      <button onClick={() => { setSubtitleCues([]); setSubtitleOffset(0); }} className="text-[10px] text-red-400 hover:text-red-300 font-bold uppercase">Remove</button>
+                    )}
+                  </div>
+
+                  {/* Load file */}
+                  <label className="flex items-center gap-3 px-4 py-3 hover:bg-theme-bg-tertiary cursor-pointer transition-colors border-b border-theme-border">
+                    <Upload size={16} className="text-theme-accent shrink-0" />
+                    <div>
+                      <p className="text-xs font-bold text-theme-text">Load subtitle file</p>
+                      <p className="text-[10px] text-theme-text-muted">.srt .vtt .ass .ssa .sub .smi .txt</p>
+                    </div>
+                    <input
+                      type="file"
+                      accept=".srt,.vtt,.ass,.ssa,.sub,.smi,.txt"
+                      className="hidden"
+                      onChange={(e) => { if (e.target.files?.[0]) loadSubtitleFile(e.target.files[0]); }}
+                    />
+                  </label>
+
+                  {/* Status */}
+                  <div className="px-4 py-3 border-b border-theme-border">
+                    <p className="text-[10px] text-theme-text-muted uppercase font-black tracking-widest mb-1">Status</p>
+                    {subtitleCues.length > 0 ? (
+                      <p className="text-xs text-theme-accent font-bold">✓ {subtitleCues.length} cues loaded</p>
+                    ) : (
+                      <p className="text-xs text-theme-text-muted">No subtitles loaded</p>
+                    )}
+                  </div>
+
+                  {/* Sync offset */}
+                  {subtitleCues.length > 0 && (
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[10px] text-theme-text-muted uppercase font-black tracking-widest">Sync offset</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-theme-accent font-bold">{subtitleOffset > 0 ? '+' : ''}{subtitleOffset.toFixed(1)}s</span>
+                          {subtitleOffset !== 0 && (
+                            <button onClick={() => setSubtitleOffset(0)} className="text-[10px] text-theme-text-muted hover:text-white uppercase font-bold">Reset</button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setSubtitleOffset(p => Math.max(-30, parseFloat((p - 0.5).toFixed(1))))} className="w-8 h-8 rounded-lg bg-theme-bg-tertiary hover:bg-theme-border text-theme-text font-bold text-sm transition-colors flex items-center justify-center">−</button>
+                        <input
+                          type="range"
+                          min="-30"
+                          max="30"
+                          step="0.1"
+                          value={subtitleOffset}
+                          onChange={(e) => setSubtitleOffset(parseFloat(e.target.value))}
+                          className="flex-1 h-1 accent-theme-accent cursor-pointer"
+                        />
+                        <button onClick={() => setSubtitleOffset(p => Math.min(30, parseFloat((p + 0.5).toFixed(1))))} className="w-8 h-8 rounded-lg bg-theme-bg-tertiary hover:bg-theme-border text-theme-text font-bold text-sm transition-colors flex items-center justify-center">+</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Quality selector - only show for HLS streams with multiple levels */}
+            {hlsLevels.length > 1 && (
+              <div className="relative flex items-center" ref={qualityMenuRef}>
+                <button
+                  onClick={() => setShowQualityMenu(p => !p)}
+                  className={`transition-colors text-xs font-black px-2 py-1 rounded border ${hlsQuality === -1 ? 'border-theme-border text-theme-text-muted hover:text-theme-accent hover:border-theme-accent' : 'border-theme-accent text-theme-accent'}`}
+                  title="Quality"
+                >
+                  {hlsQuality === -1
+                    ? `Auto${hlsCurrentLevel >= 0 ? ` · ${qualityLabel(hlsCurrentLevel)}` : ''}`
+                    : qualityLabel(hlsQuality)}
+                </button>
+
+                {showQualityMenu && (
+                  <div className="absolute bottom-10 right-0 w-44 bg-theme-bg border border-theme-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                    <div className="p-3 border-b border-theme-border">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-theme-text-muted">Quality</span>
+                    </div>
+                    {/* Auto */}
+                    <button
+                      onClick={() => applyQuality(-1)}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 text-xs hover:bg-theme-bg-tertiary transition-colors ${hlsQuality === -1 ? 'text-theme-accent font-black' : 'text-theme-text'}`}
+                    >
+                      <span>Auto</span>
+                      {hlsQuality === -1 && hlsCurrentLevel >= 0 && (
+                        <span className="text-[10px] text-theme-text-muted">{qualityLabel(hlsCurrentLevel)}</span>
+                      )}
+                      {hlsQuality === -1 && <span className="text-theme-accent text-[10px]">✓</span>}
+                    </button>
+                    {/* Levels sorted highest first */}
+                    {[...hlsLevels.map((l, i) => ({ ...l, i }))].reverse().map(({ height, bitrate, i }) => (
+                      <button
+                        key={i}
+                        onClick={() => applyQuality(i)}
+                        className={`w-full flex items-center justify-between px-4 py-2.5 text-xs hover:bg-theme-bg-tertiary transition-colors ${hlsQuality === i ? 'text-theme-accent font-black' : 'text-theme-text'}`}
+                      >
+                        <span>{height > 0 ? `${height}p` : `Level ${i}`}</span>
+                        <span className="text-[10px] text-theme-text-muted">{Math.round(bitrate / 1000)}k</span>
+                        {hlsQuality === i && <span className="text-theme-accent text-[10px]">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <button 
               onClick={() => setShowPlaylist(!showPlaylist)} 
               className={`transition-colors ${showPlaylist ? 'text-theme-primary hover:text-theme-accent' : 'text-theme-text hover:text-theme-accent'}`}
@@ -1971,17 +2382,9 @@ export default function App() {
           >
             <Monitor size={24} />
           </div>
-          <div 
-            onClick={() => setShowSettingsModal(true)}
-            className="cursor-pointer transition-colors p-2 text-theme-text-muted hover:text-theme-text"
-            title={t.settings}
-          >
-            <Settings size={24} />
-          </div>
-
           <div className="mt-auto mb-2">
              {isIptvLogged && (
-               <button onClick={() => setIsIptvLogged(false)} className="text-theme-text-muted hover:text-red-400 p-2" title={t.logout}>
+               <button onClick={handleLogoutIptv} className="text-theme-text-muted hover:text-red-400 p-2" title={t.logout}>
                  <LogOut size={22} />
                </button>
              )}
@@ -2029,50 +2432,116 @@ export default function App() {
               // IPTV MODE - Categories & Types Redesigned
               <div className="flex-1 flex flex-col overflow-hidden bg-theme-bg-secondary/40">
                 {!isIptvLogged ? (
-                  <div className="p-5 space-y-4">
-                    {/* ... (Keep existing login UI logic but cleaner) ... */}
-                    <div className="flex bg-theme-bg border border-theme-border rounded-xl p-1 mb-6">
-                       <button onClick={() => setIptvMode('code')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all shadow-sm ${iptvMode === 'code' ? 'bg-theme-accent text-black scale-100 z-10' : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-tertiary scale-95'}`}>Code</button>
-                       <button onClick={() => setIptvMode('xtream')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all shadow-sm ${iptvMode === 'xtream' ? 'bg-theme-accent text-black scale-100 z-10' : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-tertiary scale-95'}`}>Xtream</button>
-                       <button onClick={() => setIptvMode('m3u')} className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all shadow-sm ${iptvMode === 'm3u' ? 'bg-theme-accent text-black scale-100 z-10' : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-tertiary scale-95'}`}>M3U</button>
+                  <div className="p-4 space-y-4 overflow-y-auto flex-1">
+                    {/* Tab bar: Code / Xtream / M3U */}
+                    <div className="flex bg-theme-bg border border-theme-border rounded-xl p-1">
+                      {(['code', 'xtream', 'm3u'] as const).map(mode => (
+                        <button
+                          key={mode}
+                          onClick={() => setIptvMode(mode)}
+                          className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${iptvMode === mode ? 'bg-theme-accent text-black shadow-sm' : 'text-theme-text-muted hover:text-theme-text hover:bg-theme-bg-tertiary'}`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
                     </div>
 
-                    {iptvMode === 'code' ? (
-                      <div className="space-y-4">
-                         <div className="text-center text-xs text-theme-text-muted font-bold tracking-widest uppercase mb-1">Enter Activation Code</div>
-                         <div className="flex justify-center mb-4">
-                            <input 
-                              type="text" 
-                              maxLength={4} 
-                              placeholder="0000" 
-                              value={activationCode} 
-                              onChange={(e) => setActivationCode(e.target.value)} 
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleActivationLogin();
-                              }}
-                              className="w-32 bg-theme-bg border border-theme-border rounded-lg px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] text-theme-accent focus:ring-2 focus:ring-theme-accent outline-none uppercase placeholder:text-neutral-700 hover:border-theme-accent transition-colors" 
-                            />
-                         </div>
-                         <button onClick={handleActivationLogin} className="w-full bg-theme-accent hover:bg-emerald-400 text-black font-black py-3 rounded-xl active:scale-95 transition-all text-sm uppercase shadow-lg shadow-theme-accent/20">
-                           {isIptvLoading ? (
-                             <span className="flex items-center justify-center gap-2">
-                               <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                               {t.searching}
-                             </span>
-                           ) : "Activate & Login"}
-                         </button>
+                    {/* ── CODE ── */}
+                    {iptvMode === 'code' && (
+                      <div className="space-y-4 pt-2">
+                        <p className="text-center text-[10px] font-black text-theme-text-muted uppercase tracking-widest">Enter Activation Code</p>
+                        <div className="flex justify-center">
+                          <input
+                            type="text"
+                            maxLength={4}
+                            placeholder="0000"
+                            value={activationCode}
+                            onChange={(e) => setActivationCode(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleActivationLogin(); }}
+                            className="w-32 bg-theme-bg border border-theme-border rounded-lg px-4 py-3 text-center text-2xl font-mono tracking-[0.5em] text-theme-accent focus:ring-2 focus:ring-theme-accent outline-none uppercase placeholder:text-neutral-700 hover:border-theme-accent transition-colors"
+                          />
+                        </div>
+                        <button onClick={handleActivationLogin} className="w-full bg-theme-accent hover:opacity-90 text-black font-black py-3 rounded-xl active:scale-95 transition-all text-sm uppercase shadow-lg shadow-theme-accent/20">
+                          {isIptvLoading ? (
+                            <span className="flex items-center justify-center gap-2">
+                              <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                              {t.searching}
+                            </span>
+                          ) : 'Activate & Login'}
+                        </button>
                       </div>
-                    ) : iptvMode === 'xtream' ? (
-                      <div className="space-y-3">
-                         <input type="text" placeholder="Server URL" value={xtreamUrl} onChange={(e) => setXtreamUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin() }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
-                         <input type="text" placeholder="Username" value={xtreamUser} onChange={(e) => setXtreamUser(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin() }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
-                         <input type="password" placeholder="Password" value={xtreamPass} onChange={(e) => setXtreamPass(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin() }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
-                         <button onClick={() => handleXtreamLogin()} className="w-full bg-theme-accent text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">{isIptvLoading ? t.searching : t.connect}</button>
+                    )}
+
+                    {/* ── XTREAM ── */}
+                    {iptvMode === 'xtream' && (
+                      <div className="space-y-3 pt-2">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-theme-text-muted tracking-widest">Server URL</label>
+                          <input type="text" placeholder="http://server.com:8080" value={xtreamUrl} onChange={(e) => setXtreamUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin(); }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none hover:border-theme-accent transition-colors" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-theme-text-muted tracking-widest">Username</label>
+                          <input type="text" placeholder="username" value={xtreamUser} onChange={(e) => setXtreamUser(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin(); }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none hover:border-theme-accent transition-colors" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-theme-text-muted tracking-widest">Password</label>
+                          <input type="password" placeholder="••••••••" value={xtreamPass} onChange={(e) => setXtreamPass(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleXtreamLogin(); }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none hover:border-theme-accent transition-colors" />
+                        </div>
+                        <button onClick={() => handleXtreamLogin()} className="w-full bg-theme-accent hover:opacity-90 text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase mt-1">
+                          {isIptvLoading ? t.searching : t.connect}
+                        </button>
                       </div>
-                    ) : (
-                      <div className="space-y-3">
-                         <input type="text" placeholder="Playlist URL" value={m3uUrl} onChange={(e) => setM3uUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleM3ULogin() }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none" />
-                         <button onClick={() => handleM3ULogin()} className="w-full bg-theme-accent text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">{isIptvLoading ? t.searching : t.connect}</button>
+                    )}
+
+                    {/* ── M3U ── */}
+                    {iptvMode === 'm3u' && (
+                      <div className="space-y-3 pt-2">
+                        {/* Sub-tab: Playlist / Stream URL */}
+                        <div className="flex bg-theme-bg border border-theme-border rounded-lg p-0.5">
+                          <button
+                            onClick={() => setM3uSubMode('playlist')}
+                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${m3uSubMode === 'playlist' ? 'bg-theme-bg-tertiary text-theme-text shadow-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
+                          >
+                            📋 Playlist
+                          </button>
+                          <button
+                            onClick={() => setM3uSubMode('stream')}
+                            className={`flex-1 py-2 text-[10px] font-black uppercase rounded-md transition-all ${m3uSubMode === 'stream' ? 'bg-theme-bg-tertiary text-theme-text shadow-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
+                          >
+                            ▶ Stream URL
+                          </button>
+                        </div>
+
+                        {m3uSubMode === 'playlist' ? (
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-black uppercase text-theme-text-muted tracking-widest">M3U Playlist URL</label>
+                              <p className="text-[10px] text-theme-text-muted">A playlist file containing multiple channels in #EXTINF format.</p>
+                              <input type="text" placeholder="http://server.com/playlist.m3u" value={m3uUrl} onChange={(e) => setM3uUrl(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleM3ULogin(); }} className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none hover:border-theme-accent transition-colors" />
+                            </div>
+                            <button onClick={() => handleM3ULogin()} className="w-full bg-theme-accent hover:opacity-90 text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">
+                              {isIptvLoading ? t.searching : 'Load Playlist'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-black uppercase text-theme-text-muted tracking-widest">Stream URL</label>
+                              <p className="text-[10px] text-theme-text-muted">A direct link to a video or live stream (.m3u8, .mp4, etc.)</p>
+                              <input
+                                type="text"
+                                placeholder="https://example.com/stream.m3u8"
+                                value={urlInput}
+                                onChange={(e) => setUrlInput(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleOpenUrl(); }}
+                                className="w-full bg-theme-bg border border-theme-border rounded-lg px-3 py-2.5 text-xs text-theme-text focus:ring-1 focus:ring-theme-accent outline-none hover:border-theme-accent transition-colors"
+                              />
+                            </div>
+                            <button onClick={handleOpenUrl} className="w-full bg-theme-accent hover:opacity-90 text-black font-black py-2.5 rounded-lg active:scale-95 transition-all text-xs uppercase">
+                              ▶ Play Stream
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2315,10 +2784,39 @@ export default function App() {
                 </div>
               </div>
 
+              {/* IPTV */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-theme-text">IPTV</h3>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm text-theme-text">{t.iptvQuality}</span>
+                    <p className="text-[11px] text-theme-text-muted mt-0.5">{t.iptvQualityAuto}</p>
+                  </div>
+                  <div className="relative w-36">
+                    <select
+                      value={defaultHlsQuality}
+                      onChange={(e) => setDefaultHlsQuality(parseInt(e.target.value))}
+                      className="w-full appearance-none bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
+                    >
+                      <option value={-1} className="bg-theme-bg">Auto ✦</option>
+                      <option value={0} className="bg-theme-bg">144p</option>
+                      <option value={1} className="bg-theme-bg">240p</option>
+                      <option value={2} className="bg-theme-bg">360p</option>
+                      <option value={3} className="bg-theme-bg">480p</option>
+                      <option value={4} className="bg-theme-bg">720p</option>
+                      <option value={5} className="bg-theme-bg">1080p</option>
+                    </select>
+                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
+                  </div>
+                </div>
+                <p className="text-[11px] text-theme-text-muted bg-theme-bg-tertiary rounded-lg px-3 py-2">
+                  ℹ️ Auto adjusts quality based on your connection speed. Manual selection applies when the stream supports that resolution.
+                </p>
+              </div>
+
               {/* Tangentbordsgenvägar */}
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-theme-text">{t.shortcuts}</h3>
-                <button 
+                <h3 className="text-sm font-semibold text-theme-text">{t.shortcuts}</h3>                <button 
                   onClick={() => setShowShortcutsModal(true)}
                   className="w-full bg-theme-primary hover:bg-theme-hover text-white font-medium py-2.5 px-4 rounded-lg transition-colors text-sm"
                 >
