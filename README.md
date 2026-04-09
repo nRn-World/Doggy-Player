@@ -11,7 +11,8 @@
 
 This project is **NOT** licensed under MIT. It is licensed under the **nRn World Non-Commercial License**.
 
-* **Individuals & Students:** Free to download and use for personal education and private use only. You are **PROHIBITED** from generating any income or profit from this software or its code.
+* **Individuals & Students:** Free to download and use for <img width="498" height="680" alt="image" src="https://github.com/user-attachments/assets/b5e591c5-cbd5-47c7-8c27-00040acbb72b" />
+personal education and private use only. You are **PROHIBITED** from generating any income or profit from this software or its code.
 * **Companies & Organizations:** You have no right to download or use this software in a professional environment without prior written consent.
 * **Monetization:** Any commercial use, sale, or redistribution for profit requires a paid license.
 
@@ -175,7 +176,7 @@ This project is licensed under a strict **Non-Commercial License**. Commercial u
 
 ---
 
-👨‍💻 **Author:** **nRn World (Robin Ayzit)**  
+👨‍💻 **Author:** **nRn World**  
 📧 **Contact:** [bynrnworld@gmail.com](mailto:bynrnworld@gmail.com)
 
 ## 🙏 Support
