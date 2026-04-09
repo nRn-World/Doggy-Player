@@ -10,7 +10,21 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            build_cmd: npm run build:electron
+            artifacts: "release/*.exe\nrelease/*.exe.blockmap\nrelease/*.zip\nrelease/latest.yml"
+          - os: macos-latest
+            build_cmd: npm run build:electron:mac
+            artifacts: "release/*.dmg\nrelease/*.zip\nrelease/latest-mac.yml"
+          - os: ubuntu-latest
+            build_cmd: npm run build:electron:linux
+            artifacts: "release/*.AppImage\nrelease/*.deb\nrelease/*.zip\nrelease/latest-linux.yml"
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -25,18 +39,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & Package (Windows)
+      - name: Build & Package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build:electron
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: ${{ matrix.build_cmd }}
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/*.exe
-            release/*.exe.blockmap
-            release/*.zip
-            release/latest.yml
+          files: ${{ matrix.artifacts }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
