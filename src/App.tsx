@@ -3540,7 +3540,7 @@ export default function App() {
             </div>
 
             <div className="p-5 border-t border-theme-border text-center space-y-2">
-              <div className="text-xs text-theme-text-muted">{t.about} • {t.version} {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.2')}</div>
+              <div className="text-xs text-theme-text-muted">{t.about} • {t.version} {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.34')}</div>
               <div className="text-xs text-theme-text-muted">
                 Created 2026 by © nRn World<br/>
                 <div className="flex items-center justify-center gap-2 mt-1">

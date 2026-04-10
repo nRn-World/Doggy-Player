@@ -41,29 +41,31 @@ personal education and private use only. You are **PROHIBITED** from generating 
 
 ---
 
-## 📋 Latest Update — v1.1.29
+## 📋 Latest Update — v1.1.34
 
 **Bug Fixes**
-- `encodeForKV`/`decodeFromKV` — activation code encoding was broken
+
+- encodeForKV/decodeFromKV — activation code encoding was broken
 - Logout did not clear all states and localStorage keys
 - Logout button called wrong function
-- `autoRemoveFinished` + shuffle had wrong logic for next video
-- `formatTime` did not show hours for videos longer than 60 min
-- File formats in `main.js` only matched 5 formats — extended to all supported formats
+- autoRemoveFinished + shuffle had wrong logic for next video
+- formatTime did not show hours for videos longer than 60 min
+- File formats in main.js only matched 5 formats — extended to all supported formats
 - Missing translations for 6 shortcuts in the shortcuts modal
-- `ContextMenu.test.tsx` was missing `isFullscreen` and `onFullscreen` in test props
-- Subtitle icon was misaligned — missing `flex items-center` on wrapper div
-- Logout did not clear `iptvMovies`, `iptvSeries`, categories, search state
+- ContextMenu.test.tsx was missing isFullscreen and onFullscreen in test props
+- Subtitle icon was misaligned — missing flex items-center on wrapper div
+- Logout did not clear iptvMovies, iptvSeries, categories, search state
 
 **New Features**
-- Subtitle support — `.srt`, `.vtt`, `.ass`, `.ssa`, `.sub`, `.smi`, `.txt`
+
+- Subtitle support — .srt, .vtt, .ass, .ssa, .sub, .smi, .txt
 - Subtitle sync offset ±30s with slider and buttons
 - IPTV login restructured — Code / Xtream / M3U with sub-categories Playlist and Stream URL
-- Stream URL field for direct links to `.m3u8`, `.mp4` etc.
+- Stream URL field for direct links to .m3u8, .mp4 etc.
 - HLS quality selector in controls bar (Auto + manual)
 - IPTV default quality setting in Settings
 - Persistent login — stays logged in after restart and updates
-- Screenshot with `Alt+S` and camera button
+- Screenshot with Alt+S and camera button
 - Equalizer — Bass, Mid, Treble ±12dB (moved to Settings)
 - EPG TV guide — load XML, shows Now/Next per channel
 - EPG program name shown directly on channel cards in grid
