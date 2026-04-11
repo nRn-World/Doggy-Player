@@ -10,6 +10,7 @@ First off, thank you for considering contributing to Doggy Player! It's people l
 
 ### Suggesting Enhancements
 * Open a new issue using the **Feature Request** template.
+* Include the tag `enhancement` in your suggestion.
 * Explain why this feature would be useful and how you imagine it working.
 
 ### Pull Requests
