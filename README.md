@@ -86,6 +86,18 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
   </a>
 </p>
 
+<p align="center">
+  <a href="Screenshot/IPTV.png">
+    <img src="Screenshot/IPTV.png" alt="IPTV Interface" width="31%" />
+  </a>
+  <a href="Screenshot/Live.png">
+    <img src="Screenshot/Live.png" alt="Live TV" width="31%" />
+  </a>
+  <a href="Screenshot/Movie.png">
+    <img src="Screenshot/Movie.png" alt="Movies" width="31%" />
+  </a>
+</p>
+
 ---
 
 ## 🛠️ Tech Stack
