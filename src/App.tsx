@@ -66,6 +66,7 @@ const translations = {
     epgNext: "Next",
     epgNoData: "No guide data",
     epgLoading: "Loading guide...",
+    play: "Play",
     pause: "Pause",
     stop: "Stop",
     previous: "Previous",
@@ -95,7 +96,30 @@ const translations = {
     seasons: "Seasons",
     episodes: "Episodes",
     loadingInfo: "Loading...",
-    allCategories: "All Categories"
+    allCategories: "All Categories",
+    newCategoryLabel: "New Category",
+    enterCategoryName: "Enter new category name:",
+    categoryExists: "Category already exists",
+    deleteCategoryConfirm: 'Are you sure you want to delete category "{name}"?',
+    enterNewName: "Enter new name:",
+    categoryNameExists: "Category name already exists",
+    emptyCategory: "Empty category",
+    noFavorites: "No saved favorites or categories",
+    updateAvailableTitle: "Update available",
+    downloadingUpdate: "Downloading in background...",
+    updateReadyTitle: "Update ready",
+    restartToUpdate: "Restart to install the new version.",
+    restart: "Restart",
+    favoritesLabel: "Favorites",
+    standardLabel: "Standard",
+    noCategoriesCreated: "No categories created",
+    activationCodeTitle: "Enter Activation Code",
+    renderLimit: "Render Limit",
+    activateAndLogin: "Activate & Login",
+    loading: "Loading...",
+    saveCode: "Save Code",
+    shareCodeInfo: "Choose a 4-digit code to link to your login. Share the code with a friend, and they can login automatically!",
+    createActivationCode: "Create Activation Code"
   },
   sv: {
     settings: "Inställningar",
@@ -189,7 +213,30 @@ const translations = {
     seasons: "Säsonger",
     episodes: "Avsnitt",
     loadingInfo: "Laddar...",
-    allCategories: "Alla Kategorier"
+    allCategories: "Alla Kategorier",
+    newCategoryLabel: "Ny kategori",
+    enterCategoryName: "Ange namn på ny kategori:",
+    categoryExists: "Kategorin finns redan",
+    deleteCategoryConfirm: 'Är du säker på att du vill radera kategorin "{name}"?',
+    enterNewName: "Ange nytt namn:",
+    categoryNameExists: "Kategorinamnet finns redan",
+    emptyCategory: "Tom kategori",
+    noFavorites: "Inga sparade favoriter eller kategorier",
+    updateAvailableTitle: "Uppdatering tillgänglig",
+    downloadingUpdate: "Laddar ner i bakgrunden...",
+    updateReadyTitle: "Uppdatering klar",
+    restartToUpdate: "Starta om för att installera den nya versionen.",
+    restart: "Starta om",
+    favoritesLabel: "Favoriter",
+    standardLabel: "Standard",
+    noCategoriesCreated: "Inga kategorier skapade",
+    activationCodeTitle: "Ange aktiveringskod",
+    renderLimit: "Renderingsgräns",
+    activateAndLogin: "Aktivera & Logga in",
+    loading: "Laddar...",
+    saveCode: "Spara kod",
+    shareCodeInfo: "Välj en 4-siffrig kod som kopplas till din inloggning. Ge koden till en vän, så kan de logga in automatiskt!",
+    createActivationCode: "Skapa aktiveringskod"
   }
 };
 
@@ -648,23 +695,23 @@ export default function App() {
 
   
   const createFavoriteFolder = () => {
-    const name = window.prompt("Enter new category name:");
+    const name = window.prompt(t.enterCategoryName);
     if (name && name.trim()) {
-      if (favoriteFolders.some(f => f.name === name.trim())) return alert("Category already exists");
+      if (favoriteFolders.some(f => f.name === name.trim())) return alert(t.categoryExists);
       setFavoriteFolders(prev => [...prev, { name: name.trim(), items: [] }]);
     }
   };
 
   const deleteFavoriteFolder = (name: string) => {
-    if (window.confirm(`Are you sure you want to delete category "${name}"?`)) {
+    if (window.confirm(t.deleteCategoryConfirm.replace('{name}', name))) {
       setFavoriteFolders(prev => prev.filter(f => f.name !== name));
     }
   };
 
   const renameFavoriteFolder = (oldName: string) => {
-    const newName = window.prompt("Enter new name:", oldName);
+    const newName = window.prompt(t.enterNewName, oldName);
     if (newName && newName.trim() && newName !== oldName) {
-      if (favoriteFolders.some(f => f.name === newName.trim())) return alert("Category name already exists");
+      if (favoriteFolders.some(f => f.name === newName.trim())) return alert(t.categoryNameExists);
       setFavoriteFolders(prev => prev.map(f => f.name === oldName ? { ...f, name: newName.trim() } : f));
     }
   };
@@ -2995,6 +3042,88 @@ export default function App() {
                 {!isIptvLogged ? (
                   <div className="p-4 space-y-4 overflow-y-auto flex-1">
                     {/* Tab bar: Code / Xtream / M3U */}
+      <div className={`bg-theme-bg-secondary/40 backdrop-blur-xl flex shrink-0 z-20 transition-all duration-300 ease-in-out overflow-hidden ${(showPlaylist && !isFullscreen) ? 'w-[320px] border-l border-theme-border' : 'w-0 border-none'}`}>
+        
+        {/* Pro Sidebar - Vertical icon bar */}
+        <div className="w-16 border-r border-theme-border flex flex-col items-center py-6 gap-6 bg-theme-bg/40 backdrop-blur-md shrink-0">
+          <div 
+            onClick={() => {
+              if (sidebarMode === 'files' && showPlaylist) setShowPlaylist(false);
+              else {
+                setSidebarMode('files');
+                setShowPlaylist(true);
+              }
+            }}
+            className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'files' ? 'text-theme-accent bg-white/5 backdrop-blur-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
+            title={t.files}
+          >
+            <FileVideo size={24} />
+          </div>
+          <div 
+            onClick={() => {
+              if (sidebarMode === 'iptv' && showPlaylist) setShowPlaylist(false);
+              else {
+                setSidebarMode('iptv');
+                setShowPlaylist(true);
+              }
+            }}
+            className={`cursor-pointer transition-colors p-2 rounded-lg ${sidebarMode === 'iptv' ? 'text-theme-accent bg-white/5 backdrop-blur-sm' : 'text-theme-text-muted hover:text-theme-text'}`}
+            title={t.iptv}
+          >
+            <Monitor size={24} />
+          </div>
+          <div className="mt-auto mb-2">
+             {isIptvLogged && (
+               <button onClick={handleLogoutIptv} className="text-theme-text-muted hover:text-red-400 p-2" title={t.logout}>
+                 <LogOut size={22} />
+               </button>
+             )}
+          </div>
+        </div>
+
+        {/* Categories / Playlist Column */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
+          <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary/50">
+             <h2 className="text-sm font-black uppercase tracking-widest text-theme-text-muted">
+                {sidebarMode === 'files' ? t.playlist : t.iptv}
+             </h2>
+          </div>
+
+
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {sidebarMode === 'files' ? (
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {playlist.length === 0 ? (
+                  <div className="text-theme-text-muted text-sm text-center mt-10 p-6 border-2 border-dashed border-theme-border rounded-xl flex flex-col items-center gap-4">
+                    <FileVideo size={32} className="text-theme-text-muted" />
+                    <p>{t.dropPlaylist}</p>
+                  </div>
+                ) : (
+                  playlist.map((item, idx) => (
+                    <div 
+                      key={item.id}
+                      onClick={() => {
+                        setCurrentIndex(idx);
+                        setIsPlaying(true);
+                        setZoomRect(null);
+                        setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
+                      }}
+                      className={`p-3 rounded-lg cursor-pointer text-sm truncate transition-all flex items-center gap-3 group ${idx === currentIndex && sidebarMode === 'files' ? 'bg-theme-primary text-theme-primary-text font-medium shadow-md' : 'hover:bg-white/5 backdrop-blur-sm text-theme-text-muted'}`}
+                    >
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-xs ${idx === currentIndex && sidebarMode === 'files' ? 'bg-black/20' : 'bg-white/5 backdrop-blur-sm group-hover:bg-theme-border'}`}>
+                        {idx === currentIndex && sidebarMode === 'files' && isPlaying ? <Play size={10} className="ml-0.5" /> : idx + 1}
+                      </div>
+                      <span className="truncate">{item.name}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              // IPTV MODE - Categories & Types Redesigned
+              <div className="flex-1 flex flex-col overflow-hidden bg-theme-bg-secondary/40">
+                {!isIptvLogged ? (
+                  <div className="p-4 space-y-4 overflow-y-auto flex-1">
+                    {/* Tab bar: Code / Xtream / M3U */}
                     <div className="flex bg-theme-bg border border-theme-border rounded-xl p-1">
                       {(['code', 'xtream', 'm3u'] as const).map(mode => (
                         <button
@@ -3010,7 +3139,7 @@ export default function App() {
                     {/* ── CODE ── */}
                     {iptvMode === 'code' && (
                       <div className="space-y-4 pt-2">
-                        <p className="text-center text-[10px] font-black text-theme-text-muted uppercase tracking-widest">Enter Activation Code</p>
+                        <p className="text-center text-[10px] font-black text-theme-text-muted uppercase tracking-widest">{t.activationCodeTitle}</p>
                         <div className="flex justify-center">
                           <input
                             type="text"
@@ -3028,7 +3157,7 @@ export default function App() {
                               <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
                               {t.searching}
                             </span>
-                          ) : 'Activate & Login'}
+                          ) : t.activateAndLogin}
                         </button>
                       </div>
                     )}
@@ -3136,7 +3265,7 @@ export default function App() {
                        </div>
 
                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[10px] font-black text-theme-text-muted uppercase tracking-tighter">Render Limit</span>
+                          <span className="text-[10px] font-black text-theme-text-muted uppercase tracking-tighter">{t.renderLimit}</span>
                           <select 
                              value={iptvLimit}
                              onChange={(e) => setIptvLimit(parseInt(e.target.value))}
@@ -3153,15 +3282,15 @@ export default function App() {
                            onClick={() => setSelectedCategoryId(selectedCategoryId === 'favorites' ? '' : 'favorites')}
                            className={`iptv-category-item flex items-center justify-between ${selectedCategoryId === 'favorites' ? 'active' : ''}`}
                         >
-                           <span className="flex items-center gap-2"><Heart size={12} className={selectedCategoryId === 'favorites' ? "fill-red-500 text-red-500" : "text-red-400"} /> Favorites</span>
+                           <span className="flex items-center gap-2"><Heart size={12} className={selectedCategoryId === 'favorites' ? "fill-red-500 text-red-500" : "text-red-400"} /> {t.favoritesLabel}</span>
                            <ChevronDown size={12} className={`transition-transform ${selectedCategoryId === 'favorites' ? 'rotate-180' : ''}`} />
                         </div>
 
                          {selectedCategoryId === 'favorites' && (
                           <div className="ml-2 mb-1 space-y-0.5 border-l-2 border-red-500/30 pl-2 py-2">
                              <div className="flex items-center justify-between px-2 mb-2 pb-2 border-b border-white/5">
-                                <span className="text-[9px] font-black text-red-500/60 uppercase tracking-widest">Favoriter</span>
-                                <button onClick={createFavoriteFolder} className="p-1 hover:bg-white/5 rounded text-theme-text-muted hover:text-white transition-colors" title="Ny Kategori">
+                                <span className="text-[9px] font-black text-red-500/60 uppercase tracking-widest">{t.favoritesLabel}</span>
+                                <button onClick={createFavoriteFolder} className="p-1 hover:bg-white/5 rounded text-theme-text-muted hover:text-white transition-colors" title={t.newCategoryLabel}>
                                   <FolderPlus size={14} />
                                 </button>
                              </div>
@@ -3169,7 +3298,7 @@ export default function App() {
                              {/* Allmänna favoriter */}
                              {favorites.length > 0 && (
                                <div className="mb-4">
-                                 <div className="text-[9px] text-theme-text-muted px-2 py-1 font-black uppercase tracking-widest opacity-40 mb-1">Standard</div>
+                                 <div className="text-[9px] text-theme-text-muted px-2 py-1 font-black uppercase tracking-widest opacity-40 mb-1">{t.standardLabel}</div>
                                  {iptvStreams.concat(iptvMovies).concat(iptvSeries).filter(item => favorites.includes(`${iptvType}-${item.id}`)).map(item => (
                                    <div key={item.id} onClick={() => { if (iptvType==='series') fetchSeriesInfo(item); else { setPlaylist([{id:`iptv-${iptvType}-${item.id}`,name:item.name,url:item.url}]); setCurrentIndex(0); setIsPlaying(true); } }}
                                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all group ${videoSrc===item.url ? 'bg-theme-accent/20 text-theme-accent font-semibold' : 'text-theme-text/70 hover:text-theme-text hover:bg-white/5'}`}>
@@ -3205,12 +3334,12 @@ export default function App() {
                                      </button>
                                    </div>
                                  ))}
-                                 {folder.items.length === 0 && <p className="text-[9px] text-theme-text-muted/40 px-2 italic">Tom kategori</p>}
+                                 {folder.items.length === 0 && <p className="text-[9px] text-theme-text-muted/40 px-2 italic">{t.emptyCategory}</p>}
                                </div>
                              ))}
                              
                              {favorites.length === 0 && favoriteFolders.length === 0 && (
-                               <p className="text-[10px] text-theme-text-muted px-2 py-4 italic text-center">Inga sparade favoriter eller kategorier</p>
+                               <p className="text-[10px] text-theme-text-muted px-2 py-4 italic text-center">{t.noFavorites}</p>
                              )}
                           </div>
                         )}
@@ -3233,7 +3362,7 @@ export default function App() {
                               {isOpen && (
                                 <div className="ml-2 mb-1 space-y-0.5 border-l-2 border-theme-accent/30 pl-2 max-h-96 overflow-y-auto">
                                   {catItems.length === 0
-                                    ? <p className="text-[10px] text-theme-text-muted px-2 py-2 italic">Inga kanaler</p>
+                                    ? <p className="text-[10px] text-theme-text-muted px-2 py-2 italic">{t.noChannels}</p>
                                     : catItems.slice(0, iptvLimit).map(item => (
                                       <div key={item.id} onClick={() => { if (iptvType==='series') fetchSeriesInfo(item); else { setPlaylist([{id:`iptv-${iptvType}-${item.id}`,name:item.name,url:item.url}]); setCurrentIndex(0); setIsPlaying(true); } }}
                                         className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-[11px] transition-all group ${videoSrc===item.url ? 'bg-theme-accent/20 text-theme-accent font-semibold' : 'text-theme-text/70 hover:text-theme-text hover:bg-white/5 backdrop-blur-sm'}`}>
@@ -3266,8 +3395,8 @@ export default function App() {
       {updateAvailable && (
         <div className="fixed bottom-6 right-6 z-[80] bg-theme-bg border border-theme-border rounded-xl shadow-2xl p-4 flex items-center gap-4 max-w-sm">
           <div className="flex-1">
-            <p className="text-sm font-semibold text-theme-text">Uppdatering tillgänglig</p>
-            <p className="text-xs text-theme-text-muted mt-0.5">Laddar ner i bakgrunden...</p>
+            <p className="text-sm font-semibold text-theme-text">{t.updateAvailableTitle}</p>
+            <p className="text-xs text-theme-text-muted mt-0.5">{t.downloadingUpdate}</p>
           </div>
           <button onClick={() => setUpdateAvailable(false)} className="text-theme-text-muted hover:text-theme-text transition-colors"><X size={16} /></button>
         </div>
@@ -3276,8 +3405,8 @@ export default function App() {
       {updateDownloaded && (
         <div className="fixed bottom-6 right-6 z-[80] bg-theme-bg border border-theme-primary rounded-xl shadow-2xl p-4 flex items-center gap-4 max-w-sm">
           <div className="flex-1">
-            <p className="text-sm font-semibold text-theme-text">Uppdatering klar</p>
-            <p className="text-xs text-theme-text-muted mt-0.5">Starta om för att installera den nya versionen.</p>
+            <p className="text-sm font-semibold text-theme-text">{t.updateReadyTitle}</p>
+            <p className="text-xs text-theme-text-muted mt-0.5">{t.restartToUpdate}</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -3540,7 +3669,7 @@ export default function App() {
             </div>
 
             <div className="p-5 border-t border-theme-border text-center space-y-2">
-              <div className="text-xs text-theme-text-muted">{t.about} • {t.version} {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.34')}</div>
+              <div className="text-xs text-theme-text-muted">{t.about} • {t.version} {(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.35')}</div>
               <div className="text-xs text-theme-text-muted">
                 Created 2026 by © nRn World<br/>
                 <div className="flex items-center justify-center gap-2 mt-1">
@@ -3622,11 +3751,11 @@ export default function App() {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6">
           <div className="bg-theme-bg border border-theme-border rounded-2xl w-full max-w-sm overflow-hidden flex flex-col relative shadow-2xl">
              <div className="p-4 border-b border-theme-border flex items-center justify-between bg-theme-bg-secondary">
-               <h2 className="text-sm font-black uppercase text-theme-text-muted">Create Activation Code</h2>
+               <h2 className="text-sm font-black uppercase text-theme-text-muted">{t.createActivationCode}</h2>
                <button onClick={() => setShowCodeModal(false)} className="text-theme-text-muted hover:text-theme-text"><X size={18}/></button>
              </div>
              <div className="p-6 space-y-4">
-                 <p className="text-xs text-theme-text-muted">Välj en 4-siffrig kod som kopplas till din inloggning. Ge koden till en vän, så kan de logga in automatiskt!</p>
+                 <p className="text-xs text-theme-text-muted">{t.shareCodeInfo}</p>
                  <div className="flex justify-center">
                     <input 
                       type="text" 
@@ -3638,7 +3767,7 @@ export default function App() {
                     />
                  </div>
                  <button onClick={handleCreateCode} disabled={isGenerating || generateCode.length !== 4} className="w-full bg-theme-accent hover:bg-emerald-400 text-black font-black py-3 rounded-xl active:scale-95 transition-all text-sm uppercase disabled:opacity-50 disabled:active:scale-100">
-                    {isGenerating ? "Sparar..." : "Save Code"}
+                    {isGenerating ? t.loading : t.saveCode}
                  </button>
              </div>
           </div>
@@ -3657,10 +3786,10 @@ export default function App() {
             style={{ left: Math.min(moveMenu.x, window.innerWidth - 220), top: Math.min(moveMenu.y, window.innerHeight - 250) }}
           >
             <div className="px-4 py-2 border-b border-theme-border mb-1">
-              <span className="text-[10px] font-black text-theme-text-muted uppercase tracking-widest">Kategorier</span>
+              <span className="text-[10px] font-black text-theme-text-muted uppercase tracking-widest">{t.categories}</span>
             </div>
             {favoriteFolders.length === 0 && (
-              <div className="px-4 py-3 text-[10px] text-theme-text-muted italic">Inga kategorier skapade</div>
+              <div className="px-4 py-3 text-[10px] text-theme-text-muted italic">{t.noCategoriesCreated}</div>
             )}
             <div className="max-h-60 overflow-y-auto">
               {favoriteFolders.map(folder => {
