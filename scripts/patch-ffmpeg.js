@@ -10,8 +10,9 @@ const __dirname = path.dirname(__filename);
 
 async function patchFfmpeg() {
     console.log("-------------------------------------------------");
-    console.log("🎬 Doggy Player: Automatisk FFmpeg Codec Patcher");
+    console.log("🎬 Doggy Player: Automatisk FFmpeg Codec Patcher v2.0");
     console.log("Låser upp stöd för MKV, AVI, AC3, DTS, HEVC...");
+    console.log("Nyhet: Inkluderar nu även Audio-Transcoding Fallback!");
     console.log("-------------------------------------------------");
 
     return new Promise((resolve, reject) => {
