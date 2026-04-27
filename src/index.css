@@ -81,6 +81,11 @@
   scrollbar-color: var(--theme-bg-tertiary) var(--theme-bg-secondary);
 }
 
+/* Hide sidebar/menu by default */
+.sidebar-container {
+  display: none;
+}
+
 .iptv-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));

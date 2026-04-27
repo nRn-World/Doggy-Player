@@ -116,5 +116,11 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 
 ---
 
-**Author:** [nRn World](mailto:bynrnworld@gmail.com)  
-**License:** [Non-Commercial License](LICENSE)
+---
+
+## ✨ Release Notes v1.1.42
+
+Tacklar denna release två användarönskemål för att förbättra upplevelsen:
+
+*   🎬 **Automatisk videouppspelning:** Videor (t.ex. MP4) kommer nu att spelas upp automatiskt direkt när de laddas in i spelaren, vilket minskar behovet av att klicka på Play.
+*   🎨 **Standard dold sidlinje:** Sidlinjen är nu dolt som standard när Doggy Player startas, vilket ger ett renare gränssnitt från början.
