@@ -31,8 +31,8 @@ async function analyze() {
   console.log(`CINELENS bounding box: minX=${cinelensMinX}, maxX=${cinelensMaxX}, center=${(cinelensMinX + cinelensMaxX) / 2}`);
   
   // Let's find the leftmost and rightmost pixels
-  const leftPixels = playerPixels.filter(p => p.x < playerMinX + 5);
-  const rightPixels = playerPixels.filter(p => p.x > playerMaxX - 5);
+  const leftPixels = cinelensPixels.filter(p => p.x < cinelensMinX + 5);
+  const rightPixels = cinelensPixels.filter(p => p.x > cinelensMaxX - 5);
   
   console.log(`Leftmost pixels:`, leftPixels.slice(0, 5));
   console.log(`Rightmost pixels:`, rightPixels.slice(0, 5));

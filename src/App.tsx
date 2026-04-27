@@ -395,7 +395,7 @@ export default function App() {
         if (playPromise !== undefined) {
           playPromise.catch(error => {
             console.error("Playback error:", error);
-            setIsPlaying(false);
+            if (error?.name === 'NotAllowedError') setIsPlaying(false);
           });
         }
       } else {
@@ -420,7 +420,7 @@ export default function App() {
   });
   const [isMuted, setIsMuted] = useState(() => localStorage.getItem('cinelens_muteOnStart') === 'true');
   const [playbackRate, setPlaybackRate] = useState(() => parseFloat(localStorage.getItem('cinelens_defaultSpeed') || '1'));
-  const [showPlaylist, setShowPlaylist] = useState(true);
+  const [showPlaylist, setShowPlaylist] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
   const volumeIndicatorTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -2383,7 +2383,10 @@ export default function App() {
               muted={isMuted}
               className={`w-full h-full object-contain transition-opacity duration-300 ${isVideoLoading && sidebarMode === 'iptv' ? 'opacity-0' : 'opacity-100'}`}
               style={transformStyle}
-              onCanPlay={() => setIsVideoLoading(false)}
+              onCanPlay={() => {
+                setIsVideoLoading(false);
+                if (isPlaying) videoRef.current?.play().catch(() => {});
+              }}
               onPlaying={() => setIsVideoLoading(false)}
               onWaiting={() => setIsVideoLoading(true)}
               onLoadStart={() => setIsVideoLoading(true)}
@@ -2412,6 +2415,7 @@ export default function App() {
                     }
                   }
                 }
+                if (isPlaying) videoRef.current?.play().catch(() => {});
               }}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}

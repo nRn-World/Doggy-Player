@@ -18,6 +18,8 @@ let mainWindow = null;
 let streamServer = null;
 let streamPort = 3001;
 
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {

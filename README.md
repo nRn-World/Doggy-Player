@@ -122,5 +122,5 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 
 Tacklar denna release två användarönskemål för att förbättra upplevelsen:
 
-*   🎬 **Automatisk videouppspelning:** Videor (t.ex. MP4) kommer nu att spelas upp automatiskt direkt när de laddas in i spelaren, vilket minskar behovet av att klicka på Play.
-*   🎨 **Standard dold sidlinje:** Sidlinjen är nu dolt som standard när Doggy Player startas, vilket ger ett renare gränssnitt från början.
+*   🎬 **Automatisk videouppspelning:** När du öppnar en vanlig videofil (t.ex. `.mp4`) startar uppspelningen direkt (gäller även vid “Open with”, drag & drop och “Välj videofiler”).
+*   🎨 **Standard dold sidlinje:** Sidlinjen är nu dold som standard när Doggy Player startas, vilket ger ett renare gränssnitt från början.
