@@ -120,7 +120,7 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 
 ## ✨ Release Notes v1.1.42
 
-Tacklar denna release två användarönskemål för att förbättra upplevelsen:
+This release addresses two user requests to improve the experience:
 
-*   🎬 **Automatisk videouppspelning:** När du öppnar en vanlig videofil (t.ex. `.mp4`) startar uppspelningen direkt (gäller även vid “Open with”, drag & drop och “Välj videofiler”).
-*   🎨 **Standard dold sidlinje:** Sidlinjen är nu dold som standard när Doggy Player startas, vilket ger ett renare gränssnitt från början.
+*   🎬 **Automatic video playback:** When you open a standard video file (e.g. `.mp4`), playback starts immediately (also applies to “Open with”, drag & drop, and “Choose video files”).
+*   🎨 **Sidebar hidden by default:** The sidebar is now hidden on startup, giving a cleaner interface from the beginning.
