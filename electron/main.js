@@ -198,69 +198,80 @@ ipcMain.handle('get-network-info', async () => {
 
 // Media Stream Server
 function startStreamServer() {
-  const server = express();
-  
-  server.get('/stream', (req, res) => {
-    const videoPath = req.query.path;
-    const transcode = req.query.transcode === 'true';
+  return new Promise((resolve) => {
+    if (streamServer) return resolve(streamPort);
 
-    if (!videoPath || !fs.existsSync(videoPath)) {
-      return res.status(404).send('File not found');
-    }
+    const server = express();
+    
+    server.get('/stream', (req, res) => {
+      const videoPath = req.query.path;
+      const transcode = req.query.transcode === 'true';
 
-    const stat = fs.statSync(videoPath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-
-    if (transcode) {
-      console.log(`[Stream] Transcoding audio to AAC for: ${videoPath}`);
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Transfer-Encoding': 'chunked'
-      });
-
-      ffmpeg(videoPath)
-        .videoCodec('copy') // Keep original video (fast)
-        .audioCodec('aac')  // Transcode audio to AAC (compatible)
-        .format('matroska') // MKV/MP4 hybrid streaming
-        .on('error', (err) => {
-          console.error('[Stream Error]', err.message);
-        })
-        .pipe(res, { end: true });
-    } else {
-      if (range) {
-        const parts = range.replace(/bytes=/, "").split("-");
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        const chunksize = (end - start) + 1;
-        const file = fs.createReadStream(videoPath, { start, end });
-        const head = {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': chunksize,
-          'Content-Type': 'video/mp4',
-        };
-        res.writeHead(206, head);
-        file.pipe(res);
-      } else {
-        const head = {
-          'Content-Length': fileSize,
-          'Content-Type': 'video/mp4',
-        };
-        res.writeHead(200, head);
-        fs.createReadStream(videoPath).pipe(res);
+      if (!videoPath || !fs.existsSync(videoPath)) {
+        return res.status(404).send('File not found');
       }
-    }
-  });
 
-  streamServer = server.listen(0, '127.0.0.1', () => {
-    streamPort = streamServer.address().port;
-    console.log(`🎬 Media server running on http://127.0.0.1:${streamPort}`);
+      const stat = fs.statSync(videoPath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      if (transcode) {
+        console.log(`[Stream] Transcoding audio to AAC for: ${videoPath}`);
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Transfer-Encoding': 'chunked'
+        });
+
+        ffmpeg(videoPath)
+          .videoCodec('copy')
+          .audioCodec('aac')
+          .format('matroska')
+          .on('error', (err) => {
+            console.error('[Stream Error]', err.message);
+          })
+          .pipe(res, { end: true });
+      } else {
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          const chunksize = (end - start) + 1;
+          const file = fs.createReadStream(videoPath, { start, end });
+          const head = {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize,
+            'Content-Type': 'video/mp4',
+          };
+          res.writeHead(206, head);
+          file.pipe(res);
+        } else {
+          const head = {
+            'Content-Length': fileSize,
+            'Content-Type': 'video/mp4',
+          };
+          res.writeHead(200, head);
+          fs.createReadStream(videoPath).pipe(res);
+        }
+      }
+    });
+
+    streamServer = server.listen(0, '127.0.0.1', () => {
+      streamPort = streamServer.address().port;
+      console.log(`🎬 Media server running on http://127.0.0.1:${streamPort}`);
+      resolve(streamPort);
+    });
   });
 }
 
-ipcMain.handle('get-stream-url', (event, filePath, transcode = false) => {
-  if (!streamServer) startStreamServer();
+// Pre-start server when app is ready
+app.whenReady().then(() => {
+  startStreamServer();
+});
+
+ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
+  const port = await startStreamServer();
+  
   let cleanPath = filePath;
   if (cleanPath.startsWith('file:///')) cleanPath = cleanPath.slice(8);
   else if (cleanPath.startsWith('file://')) cleanPath = cleanPath.slice(7);
@@ -268,7 +279,7 @@ ipcMain.handle('get-stream-url', (event, filePath, transcode = false) => {
     try { cleanPath = decodeURIComponent(cleanPath); } catch(e) {}
     cleanPath = cleanPath.replace(/\//g, '\\');
   }
-  return `http://127.0.0.1:${streamPort}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
+  return `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
 });
 
 app.on('window-all-closed', () => {
