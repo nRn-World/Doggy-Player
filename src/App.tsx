@@ -2834,18 +2834,7 @@ export default function App() {
               <Camera size={20} />
             </button>
 
-            {playlist[currentIndex] && !isHlsStream(videoSrc) && (
-              <button 
-                onClick={() => setIsTranscoding(!isTranscoding)} 
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all active:scale-95 ${isTranscoding ? 'bg-theme-accent text-black border-theme-accent shadow-[0_0_15px_rgba(var(--theme-accent),0.3)]' : 'bg-theme-bg-secondary text-theme-text-muted border-theme-border/30 hover:border-theme-accent hover:text-theme-accent'}`}
-                title={t.repairAudio}
-              >
-                <Activity size={16} className={isTranscoding ? "animate-pulse" : ""} />
-                <span className="text-[10px] font-black uppercase tracking-widest hidden lg:inline">
-                  {isTranscoding ? "Fixing Ljud / MKV" : "Fixa Ljud (MKV)"}
-                </span>
-              </button>
-            )}
+            {/* Audio repair is now automatic, button removed */}
 
             {/* Subtitle button */}
             <div className="relative flex items-center" ref={subtitleMenuRef}>
