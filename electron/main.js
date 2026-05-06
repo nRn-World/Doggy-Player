@@ -261,7 +261,14 @@ function startStreamServer() {
 
 ipcMain.handle('get-stream-url', (event, filePath, transcode = false) => {
   if (!streamServer) startStreamServer();
-  return `http://127.0.0.1:${streamPort}/stream?path=${encodeURIComponent(filePath)}${transcode ? '&transcode=true' : ''}`;
+  let cleanPath = filePath;
+  if (cleanPath.startsWith('file:///')) cleanPath = cleanPath.slice(8);
+  else if (cleanPath.startsWith('file://')) cleanPath = cleanPath.slice(7);
+  if (process.platform === 'win32') {
+    try { cleanPath = decodeURIComponent(cleanPath); } catch(e) {}
+    cleanPath = cleanPath.replace(/\//g, '\\');
+  }
+  return `http://127.0.0.1:${streamPort}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
 });
 
 app.on('window-all-closed', () => {

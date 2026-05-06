@@ -345,8 +345,8 @@ export default function App() {
         hlsRef.current = null;
       }
 
-      // Check if it's a local file path
-      const isLocalPath = videoSrc.startsWith('/') || videoSrc.includes(':\\');
+      // Check if it's a local file path (handles raw paths and file:// URLs)
+      const isLocalPath = videoSrc.startsWith('/') || videoSrc.includes(':\\') || videoSrc.startsWith('file:');
       if (isLocalPath && (window as any).require) {
         try {
           const { ipcRenderer } = (window as any).require('electron');
@@ -1067,7 +1067,8 @@ export default function App() {
 
   useEffect(() => {
     const handleFileLoad = (filePath: string) => {
-      const fileUrl = 'file:///' + filePath.replace(/\\/g, '/');
+      // Use raw filePath for local files to avoid issues with '#' and other special characters in file:// URLs
+      const fileUrl = filePath;
       const fileName = filePath.split('\\').pop() || filePath.split('/').pop() || 'Video';
       
       setPlaylist(prev => {
