@@ -351,9 +351,14 @@ export default function App() {
         try {
           const { ipcRenderer } = (window as any).require('electron');
           ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((url: string) => {
+            console.log("🎬 Generated Stream URL:", url);
             setRealVideoUrl(url);
+          }).catch((err: any) => {
+            console.error("❌ IPC Invoke Error:", err);
+            setRealVideoUrl(videoSrc);
           });
         } catch (e) {
+          console.error("❌ IPC Require Error:", e);
           setRealVideoUrl(videoSrc);
         }
       } else {

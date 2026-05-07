@@ -229,20 +229,16 @@ function startStreamServer() {
         const command = ffmpeg(videoPath);
         
         if (needsFullTranscode) {
-          // Transcode video to H.264 for formats like .VOB to ensure compatibility with Chromium
+          console.log(`[Stream] Full transcode (H.264) triggered for: ${ext}`);
           command.videoCodec('libx264')
-                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0']);
+                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p']);
         } else {
-          // Only transcode audio (e.g. for MKV with AC3)
           command.videoCodec('copy');
         }
 
         command.audioCodec('aac')
-          .format('mp4')
-          .outputOptions([
-            '-movflags frag_keyframe+empty_moov+default_base_moof',
-            '-tune zerolatency'
-          ])
+          .format('matroska')
+          .on('start', (cmd) => console.log('[FFmpeg] Command:', cmd))
           .on('error', (err) => {
             console.error('[Stream Error]', err.message);
           })
