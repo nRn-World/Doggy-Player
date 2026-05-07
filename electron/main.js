@@ -9,7 +9,11 @@ import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 
-ffmpeg.setFfmpegPath(ffmpegPath);
+let ffmpegExePath = ffmpegPath;
+if (app.isPackaged) {
+  ffmpegExePath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+}
+ffmpeg.setFfmpegPath(ffmpegExePath);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

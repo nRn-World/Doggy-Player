@@ -1,7 +1,7 @@
 {
   "name": "doggy-player",
   "private": true,
-  "version": "1.1.50",
+  "version": "1.1.51",
   "description": "Doggy Video Player",
   "author": {
     "name": "nRn World",
@@ -58,6 +58,10 @@
   "build": {
     "appId": "com.doggy.player",
     "productName": "Doggy Player",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static"
+    ],
     "directories": {
       "output": "release"
     },
