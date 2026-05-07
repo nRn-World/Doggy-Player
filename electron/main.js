@@ -8,6 +8,7 @@ import express from 'express';
 import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
+import { exec } from 'child_process';
 
 let ffmpegExePath = ffmpegPath;
 if (app.isPackaged) {
@@ -204,6 +205,7 @@ ipcMain.handle('get-network-info', async () => {
 async function getVideoDuration(videoPath) {
   return new Promise((resolve) => {
     const cp = exec(`"${ffmpegExePath}" -i "${videoPath}"`, (error, stdout, stderr) => {
+      if (!stderr) return resolve(0);
       const match = stderr.match(/Duration: (\d\d):(\d\d):(\d\d)\.(\d\d)/);
       if (match) {
         const h = parseInt(match[1]);
