@@ -1338,7 +1338,7 @@ export default function App() {
 
   // Handle File Upload
   const handleFiles = (files: FileList | File[]) => {
-    const videoExtensions = ['.mp4', '.m4v', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.ogg', '.ogv', '.3gp', '.vob', '.ts', '.m2ts', '.rm', '.rmvb', '.divx', '.xvid', '.mpeg', '.mpg', '.hevc', '.av1'];
+    const videoExtensions = ['.mp4', '.m4v', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.ogg', '.ogv', '.3gp', '.vob', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid', '.mpeg', '.mpg', '.hevc', '.av1'];
     const videoFiles = Array.from(files).filter(f => {
       if (f.type.startsWith('video/')) return true;
       const lowerName = f.name.toLowerCase();
@@ -1813,7 +1813,7 @@ export default function App() {
               lastRightArrowPressTime.current = now;
             }
           } else {
-            const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=');
+            const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
             if (isTranscodedStream) {
               seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) + 10);
             } else {
@@ -1826,7 +1826,7 @@ export default function App() {
             e.preventDefault();
             break;
           }
-          const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=');
+          const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
           if (isTranscodedStream) {
             seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) - 10);
           } else {
@@ -2126,7 +2126,7 @@ export default function App() {
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     
-    if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=')) {
+    if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true')) {
       seekTranscoded(time);
     } else {
       setCurrentTime(time);
@@ -2395,7 +2395,7 @@ export default function App() {
                 <label className="cursor-pointer bg-theme-accent hover:opacity-90 text-black px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center gap-2 shadow-xl active:scale-95">
                   <FileVideo size={18} />
                   <span>{t.chooseFiles}</span>
-                  <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.vob,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg" multiple className="hidden" onChange={handleFileChange} />
+                  <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.mts,.vob,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg" multiple className="hidden" onChange={handleFileChange} />
                 </label>
               </div>
             </div>

@@ -241,7 +241,7 @@ function startStreamServer() {
       const range = req.headers.range;
 
       const ext = path.extname(videoPath).toLowerCase();
-      const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
+      const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
 
       if (transcode || needsFullTranscode) {
         console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL' : 'AUDIO'} from ${start}s: ${videoPath}`);
@@ -324,10 +324,14 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
     cleanPath = cleanPath.replace(/\//g, '\\');
   }
   
+  const ext = path.extname(cleanPath).toLowerCase();
+  const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
+  const willTranscode = transcode || needsFullTranscode;
+
   const duration = await getVideoDuration(cleanPath);
-  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
+  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${willTranscode ? '&transcode=true' : ''}`;
   
-  return { url, duration };
+  return { url, duration, isTranscoded: willTranscode };
 });
 
 app.on('window-all-closed', () => {
