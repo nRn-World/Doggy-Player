@@ -1813,7 +1813,12 @@ export default function App() {
               lastRightArrowPressTime.current = now;
             }
           } else {
-            videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+            const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=');
+            if (isTranscodedStream) {
+              seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) + 10);
+            } else {
+              videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+            }
           }
           break;
         case 'ArrowLeft':
@@ -1821,7 +1826,12 @@ export default function App() {
             e.preventDefault();
             break;
           }
-          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=');
+          if (isTranscodedStream) {
+            seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) - 10);
+          } else {
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          }
           break;
         case 'ArrowUp':
           if (keysPressed.current['KeyR']) {
@@ -2086,6 +2096,15 @@ export default function App() {
     }
   };
 
+  // Seek helper for transcoded streams
+  const seekTranscoded = (newTime: number) => {
+    const clampedTime = Math.max(0, Math.min(streamDurationRef.current || Infinity, newTime));
+    streamSeekOffsetRef.current = clampedTime;
+    setCurrentTime(clampedTime);
+    const baseUrl = realVideoUrl.split('&start=')[0];
+    setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
+  };
+
   const stopVideo = () => {
     if (videoRef.current) {
       videoRef.current.pause();
@@ -2106,14 +2125,11 @@ export default function App() {
 
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    setCurrentTime(time);
     
     if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=')) {
-      // For transcoded streams, restart the stream from the new timestamp
-      streamSeekOffsetRef.current = time;
-      const baseUrl = realVideoUrl.split('&start=')[0];
-      setRealVideoUrl(`${baseUrl}&start=${Math.floor(time)}`);
+      seekTranscoded(time);
     } else {
+      setCurrentTime(time);
       if (videoRef.current) videoRef.current.currentTime = time;
     }
   };
@@ -2411,7 +2427,10 @@ export default function App() {
               onPlaying={() => setIsVideoLoading(false)}
               onWaiting={() => setIsVideoLoading(true)}
               onLoadStart={() => setIsVideoLoading(true)}
-              onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime || 0)}
+              onTimeUpdate={() => {
+                const rawTime = videoRef.current?.currentTime || 0;
+                setCurrentTime(streamSeekOffsetRef.current + rawTime);
+              }}
               onError={(e) => {
                 const video = videoRef.current;
                 if (video?.error) {
