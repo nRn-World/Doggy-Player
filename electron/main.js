@@ -215,16 +215,29 @@ function startStreamServer() {
       const fileSize = stat.size;
       const range = req.headers.range;
 
-      if (transcode) {
-        console.log(`[Stream] Transcoding audio to AAC for: ${videoPath}`);
+      const ext = path.extname(videoPath).toLowerCase();
+      // List of formats that Chromium cannot play natively and need transcoding (like VOB/MPEG-2)
+      const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
+
+      if (transcode || needsFullTranscode) {
+        console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL (Video+Audio)' : 'AUDIO'} for: ${videoPath}`);
         res.writeHead(200, {
           'Content-Type': 'video/mp4',
           'Transfer-Encoding': 'chunked'
         });
 
-        ffmpeg(videoPath)
-          .videoCodec('copy')
-          .audioCodec('aac')
+        const command = ffmpeg(videoPath);
+        
+        if (needsFullTranscode) {
+          // Transcode video to H.264 for formats like .VOB to ensure compatibility with Chromium
+          command.videoCodec('libx264')
+                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0']);
+        } else {
+          // Only transcode audio (e.g. for MKV with AC3)
+          command.videoCodec('copy');
+        }
+
+        command.audioCodec('aac')
           .format('matroska')
           .on('error', (err) => {
             console.error('[Stream Error]', err.message);
