@@ -352,6 +352,8 @@ export default function App() {
           const { ipcRenderer } = (window as any).require('electron');
           ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((res: { url: string, duration: number }) => {
             console.log("🎬 Generated Stream URL:", res.url, "Duration:", res.duration);
+            streamSeekOffsetRef.current = 0;
+            streamDurationRef.current = res.duration;
             setRealVideoUrl(res.url);
             if (res.duration > 0) {
               setDuration(res.duration);
@@ -417,6 +419,8 @@ export default function App() {
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const streamDurationRef = useRef<number>(0); // Stores pre-probed duration for transcoded streams
+  const streamSeekOffsetRef = useRef<number>(0); // Tracks seek offset for transcoded streams
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -2105,9 +2109,10 @@ export default function App() {
     setCurrentTime(time);
     
     if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=')) {
-      // For transcoded streams, we need to restart from the new timestamp
+      // For transcoded streams, restart the stream from the new timestamp
+      streamSeekOffsetRef.current = time;
       const baseUrl = realVideoUrl.split('&start=')[0];
-      setRealVideoUrl(`${baseUrl}&start=${time}`);
+      setRealVideoUrl(`${baseUrl}&start=${Math.floor(time)}`);
     } else {
       if (videoRef.current) videoRef.current.currentTime = time;
     }
@@ -2420,8 +2425,20 @@ export default function App() {
                 if (videoRef.current) {
                   videoRef.current.volume = Math.min(1, volume);
                   videoRef.current.muted = isMuted;
+                  // Restore position after a seek-triggered stream reload
+                  if (streamSeekOffsetRef.current > 0) {
+                    setCurrentTime(streamSeekOffsetRef.current);
+                  }
                 }
-                setDuration(videoRef.current?.duration || 0);
+                // Only update duration from video element if it's finite.
+                // For transcoded streams it's Infinity, so keep the pre-probed value.
+                const vDur = videoRef.current?.duration;
+                if (vDur && isFinite(vDur) && vDur > 0) {
+                  setDuration(vDur);
+                  streamDurationRef.current = vDur;
+                } else if (streamDurationRef.current > 0) {
+                  setDuration(streamDurationRef.current);
+                }
                 if (resumePlayback && videoSrc) {
                   const savedTime = localStorage.getItem(`cinelens_progress_${videoSrc}`);
                   if (savedTime && videoRef.current) {
