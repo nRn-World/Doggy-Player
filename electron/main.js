@@ -200,6 +200,24 @@ ipcMain.handle('get-network-info', async () => {
   }
 });
 
+// Helper to get video duration
+async function getVideoDuration(videoPath) {
+  return new Promise((resolve) => {
+    const cp = exec(`"${ffmpegExePath}" -i "${videoPath}"`, (error, stdout, stderr) => {
+      const match = stderr.match(/Duration: (\d\d):(\d\d):(\d\d)\.(\d\d)/);
+      if (match) {
+        const h = parseInt(match[1]);
+        const m = parseInt(match[2]);
+        const s = parseInt(match[3]);
+        const hundredths = parseInt(match[4]);
+        resolve(h * 3600 + m * 60 + s + hundredths / 100);
+      } else {
+        resolve(0);
+      }
+    });
+  });
+}
+
 // Media Stream Server
 function startStreamServer() {
   return new Promise((resolve) => {
@@ -210,6 +228,7 @@ function startStreamServer() {
     server.get('/stream', (req, res) => {
       const videoPath = req.query.path;
       const transcode = req.query.transcode === 'true';
+      const start = req.query.start ? parseFloat(req.query.start) : 0;
 
       if (!videoPath || !fs.existsSync(videoPath)) {
         return res.status(404).send('File not found');
@@ -220,11 +239,10 @@ function startStreamServer() {
       const range = req.headers.range;
 
       const ext = path.extname(videoPath).toLowerCase();
-      // List of formats that Chromium cannot play natively and need transcoding (like VOB/MPEG-2)
       const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
 
       if (transcode || needsFullTranscode) {
-        console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL (Video+Audio)' : 'AUDIO'} for: ${videoPath}`);
+        console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL' : 'AUDIO'} from ${start}s: ${videoPath}`);
         res.writeHead(200, {
           'Content-Type': 'video/mp4',
           'Transfer-Encoding': 'chunked'
@@ -232,8 +250,11 @@ function startStreamServer() {
 
         const command = ffmpeg(videoPath);
         
+        if (start > 0) {
+          command.seekInput(start);
+        }
+
         if (needsFullTranscode) {
-          console.log(`[Stream] Full transcode (H.264) triggered for: ${ext}`);
           command.videoCodec('libx264')
                  .addOptions(['-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p']);
         } else {
@@ -247,6 +268,10 @@ function startStreamServer() {
             console.error('[Stream Error]', err.message);
           })
           .pipe(res, { end: true });
+
+        res.on('close', () => {
+          try { command.kill(); } catch (e) {}
+        });
       } else {
         if (range) {
           const parts = range.replace(/bytes=/, "").split("-");
@@ -296,7 +321,11 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
     try { cleanPath = decodeURIComponent(cleanPath); } catch(e) {}
     cleanPath = cleanPath.replace(/\//g, '\\');
   }
-  return `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
+  
+  const duration = await getVideoDuration(cleanPath);
+  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${transcode ? '&transcode=true' : ''}`;
+  
+  return { url, duration };
 });
 
 app.on('window-all-closed', () => {

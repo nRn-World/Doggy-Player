@@ -350,9 +350,12 @@ export default function App() {
       if (isLocalPath && (window as any).require) {
         try {
           const { ipcRenderer } = (window as any).require('electron');
-          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((url: string) => {
-            console.log("🎬 Generated Stream URL:", url);
-            setRealVideoUrl(url);
+          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((res: { url: string, duration: number }) => {
+            console.log("🎬 Generated Stream URL:", res.url, "Duration:", res.duration);
+            setRealVideoUrl(res.url);
+            if (res.duration > 0) {
+              setDuration(res.duration);
+            }
           }).catch((err: any) => {
             console.error("❌ IPC Invoke Error:", err);
             setRealVideoUrl(videoSrc);
@@ -2100,7 +2103,14 @@ export default function App() {
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     setCurrentTime(time);
-    if (videoRef.current) videoRef.current.currentTime = time;
+    
+    if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('?path=')) {
+      // For transcoded streams, we need to restart from the new timestamp
+      const baseUrl = realVideoUrl.split('&start=')[0];
+      setRealVideoUrl(`${baseUrl}&start=${time}`);
+    } else {
+      if (videoRef.current) videoRef.current.currentTime = time;
+    }
   };
 
   const handleTimelineMouseMove = (e: React.MouseEvent<HTMLInputElement>) => {
