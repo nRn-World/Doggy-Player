@@ -238,7 +238,11 @@ function startStreamServer() {
         }
 
         command.audioCodec('aac')
-          .format('matroska')
+          .format('mp4')
+          .outputOptions([
+            '-movflags frag_keyframe+empty_moov+default_base_moof',
+            '-tune zerolatency'
+          ])
           .on('error', (err) => {
             console.error('[Stream Error]', err.message);
           })

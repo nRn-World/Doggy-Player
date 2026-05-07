@@ -1337,7 +1337,7 @@ export default function App() {
     const newItems = videoFiles.map(file => ({
       id: Math.random().toString(36).substring(2, 9),
       name: file.name,
-      url: URL.createObjectURL(file)
+      url: (file as any).path || URL.createObjectURL(file)
     }));
 
     setPlaylist(prev => {
