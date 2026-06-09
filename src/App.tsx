@@ -1758,9 +1758,11 @@ export default function App() {
       }
 
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-        // Always preventDefault for arrow keys so no focused UI element (buttons, sliders, etc.)
-        // can steal ArrowLeft/ArrowRight when the player is active.
-        e.preventDefault();
+        if (keysPressed.current['KeyR']) {
+          e.preventDefault();
+        } else if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+          e.preventDefault();
+        }
       }
 
       switch (e.code) {
@@ -1794,8 +1796,13 @@ export default function App() {
           }
           break;
         case 'ArrowRight':
+          // Blur any focused UI element (buttons, range sliders) so they
+          // can't intercept arrow keys — then seek as normal.
+          e.preventDefault();
+          if (document.activeElement && document.activeElement !== document.body) {
+            (document.activeElement as HTMLElement).blur();
+          }
           if (keysPressed.current['KeyR']) {
-            e.preventDefault();
             break;
           }
           if (e.altKey) {
@@ -1820,8 +1827,13 @@ export default function App() {
           }
           break;
         case 'ArrowLeft':
+          // Blur any focused UI element (buttons, range sliders) so they
+          // can't intercept arrow keys — then seek as normal.
+          e.preventDefault();
+          if (document.activeElement && document.activeElement !== document.body) {
+            (document.activeElement as HTMLElement).blur();
+          }
           if (keysPressed.current['KeyR']) {
-            e.preventDefault();
             break;
           }
           const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
@@ -2000,13 +2012,6 @@ export default function App() {
   // Mouse Selection Logic
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || !containerRef.current) return;
-
-    // Blur any focused element (e.g. seek button, volume slider) so that
-    // window-level keyboard shortcuts (ArrowLeft/Right) always work after
-    // clicking the video area or entering fullscreen.
-    if (document.activeElement && document.activeElement !== document.body) {
-      (document.activeElement as HTMLElement).blur();
-    }
 
     if (e.altKey && zoomState.scale > 1) {
       setIsPanning(true);
