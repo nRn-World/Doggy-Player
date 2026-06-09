@@ -1715,241 +1715,255 @@ export default function App() {
   const preSlowMoState = useRef({ wasPlaying: false, rate: 1.0 });
 
   // Keyboard Shortcuts (VLC style)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = true;
-      setIsAltPressed(e.altKey);
-      if (!videoRef.current) return;
+  const handleKeyDown = (e: KeyboardEvent) => {
+    keysPressed.current[e.code] = true;
+    setIsAltPressed(e.altKey);
+    if (!videoRef.current) return;
 
-      if (e.altKey) {
-        e.preventDefault(); // Prevent browser menu focus
-        
-        // Handle ALT + 0-9 for quick zoom
-        const match = e.code.match(/^(Digit|Numpad)(\d)$/);
-        if (match) {
-          const num = parseInt(match[2], 10);
-          if (num === 0) {
-            setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
-            setZoomRect(null);
-            rotationRef.current = 0;
-            setRotation(0);
-          } else {
-            const targetScale = num * 10;
-            setZoomState(prev => {
-              let targetVcX = prev.vcX;
-              let targetVcY = prev.vcY;
-              
-              if (zoomRectRef.current) {
-                targetVcX = zoomRectRef.current.xPct + zoomRectRef.current.wPct / 2;
-                targetVcY = zoomRectRef.current.yPct + zoomRectRef.current.hPct / 2;
-              }
+    if (e.altKey) {
+      e.preventDefault(); // Prevent browser menu focus
+      
+      // Handle ALT + 0-9 for quick zoom
+      const match = e.code.match(/^(Digit|Numpad)(\d)$/);
+      if (match) {
+        const num = parseInt(match[2], 10);
+        if (num === 0) {
+          setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
+          setZoomRect(null);
+          rotationRef.current = 0;
+          setRotation(0);
+        } else {
+          const targetScale = num * 10;
+          setZoomState(prev => {
+            let targetVcX = prev.vcX;
+            let targetVcY = prev.vcY;
+            
+            if (zoomRectRef.current) {
+              targetVcX = zoomRectRef.current.xPct + zoomRectRef.current.wPct / 2;
+              targetVcY = zoomRectRef.current.yPct + zoomRectRef.current.hPct / 2;
+            }
 
-              // Center the target point on the screen (50%)
-              let newTx = 50 - targetVcX * targetScale;
-              let newTy = 50 - targetVcY * targetScale;
+            // Center the target point on the screen (50%)
+            let newTx = 50 - targetVcX * targetScale;
+            let newTy = 50 - targetVcY * targetScale;
 
-              newTx = Math.max(100 * (1 - targetScale), Math.min(newTx, 0));
-              newTy = Math.max(100 * (1 - targetScale), Math.min(newTy, 0));
-              return { ...prev, scale: targetScale, tx: newTx, ty: newTy, vcX: targetVcX, vcY: targetVcY };
-            });
-          }
-          return;
+            newTx = Math.max(100 * (1 - targetScale), Math.min(newTx, 0));
+            newTy = Math.max(100 * (1 - targetScale), Math.min(newTy, 0));
+            return { ...prev, scale: targetScale, tx: newTx, ty: newTy, vcX: targetVcX, vcY: targetVcY };
+          });
         }
+        return;
       }
+    }
 
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (keysPressed.current['KeyR']) {
+        e.preventDefault();
+      } else if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+        e.preventDefault();
+      }
+    }
+
+    switch (e.code) {
+      case 'Space':
+      case 'KeyK':
+        if (!e.repeat) {
+          preSlowMoState.current = {
+            wasPlaying: !videoRef.current.paused,
+            rate: videoRef.current.playbackRate
+          };
+          spacePressTimer.current = setTimeout(() => {
+            isSlowMoActive.current = true;
+            if (videoRef.current) {
+              videoRef.current.playbackRate = 0.25;
+              setPlaybackRate(0.25);
+              if (videoRef.current.paused) {
+                initAudio();
+                videoRef.current.play().catch(console.error);
+                setIsPlaying(true);
+              }
+            }
+          }, 250);
+        }
+        break;
+      case 'KeyS':
+        if (e.altKey) {
+          e.preventDefault();
+          takeScreenshot();
+        } else {
+          stopVideo();
+        }
+        break;
+      case 'ArrowRight':
+        // Blur any focused UI element (buttons, range sliders) so they
+        // can't intercept arrow keys — then seek as normal.
+        e.preventDefault();
+        if (document.activeElement && document.activeElement !== document.body) {
+          (document.activeElement as HTMLElement).blur();
+        }
         if (keysPressed.current['KeyR']) {
-          e.preventDefault();
-        } else if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
-          e.preventDefault();
+          break;
         }
-      }
-
-      switch (e.code) {
-        case 'Space':
-        case 'KeyK':
+        if (e.altKey) {
           if (!e.repeat) {
-            preSlowMoState.current = {
-              wasPlaying: !videoRef.current.paused,
-              rate: videoRef.current.playbackRate
-            };
-            spacePressTimer.current = setTimeout(() => {
-              isSlowMoActive.current = true;
-              if (videoRef.current) {
-                videoRef.current.playbackRate = 0.25;
-                setPlaybackRate(0.25);
-                if (videoRef.current.paused) {
-                  initAudio();
-                  videoRef.current.play().catch(console.error);
-                  setIsPlaying(true);
-                }
-              }
-            }, 250);
-          }
-          break;
-        case 'KeyS':
-          if (e.altKey) {
-            e.preventDefault();
-            takeScreenshot();
-          } else {
-            stopVideo();
-          }
-          break;
-        case 'ArrowRight':
-          // Blur any focused UI element (buttons, range sliders) so they
-          // can't intercept arrow keys — then seek as normal.
-          e.preventDefault();
-          if (document.activeElement && document.activeElement !== document.body) {
-            (document.activeElement as HTMLElement).blur();
-          }
-          if (keysPressed.current['KeyR']) {
-            break;
-          }
-          if (e.altKey) {
-            if (!e.repeat) {
-              const now = Date.now();
-              if (now - lastRightArrowPressTime.current < 400) {
-                videoRef.current.playbackRate = 2.0;
-                setPlaybackRate(2.0);
-              } else {
-                videoRef.current.playbackRate = 1.5;
-                setPlaybackRate(1.5);
-              }
-              lastRightArrowPressTime.current = now;
-            }
-          } else {
-            const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
-            if (isTranscodedStream) {
-              seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) + 10);
+            const now = Date.now();
+            if (now - lastRightArrowPressTime.current < 400) {
+              videoRef.current.playbackRate = 2.0;
+              setPlaybackRate(2.0);
             } else {
-              videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+              videoRef.current.playbackRate = 1.5;
+              setPlaybackRate(1.5);
             }
-          }
-          break;
-        case 'ArrowLeft':
-          // Blur any focused UI element (buttons, range sliders) so they
-          // can't intercept arrow keys — then seek as normal.
-          e.preventDefault();
-          if (document.activeElement && document.activeElement !== document.body) {
-            (document.activeElement as HTMLElement).blur();
-          }
-          if (keysPressed.current['KeyR']) {
-            break;
-          }
-          const isTranscodedStream = realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
-          if (isTranscodedStream) {
-            seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) - 10);
-          } else {
-            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
-          }
-          break;
-        case 'ArrowUp':
-          if (keysPressed.current['KeyR']) {
-            e.preventDefault();
-            rotationRef.current = 180;
-            setRotation(180);
-            break;
-          }
-          updateVolume(volumeRef.current + 0.05, true);
-          break;
-        case 'ArrowDown':
-          if (keysPressed.current['KeyR']) {
-            e.preventDefault();
-            rotationRef.current = 0;
-            setRotation(0);
-            break;
-          }
-          updateVolume(volumeRef.current - 0.05, true);
-          break;
-        case 'KeyM':
-          toggleMute();
-          break;
-        case 'KeyF':
-          toggleFullscreen();
-          break;
-        case 'Equal':
-        case 'NumpadAdd':
-          setZoomState(prev => {
-            const newScale = Math.min(prev.scale * 1.2, 10);
-            return { ...prev, scale: newScale };
-          });
-          break;
-        case 'Minus':
-        case 'NumpadSubtract':
-          setZoomState(prev => {
-            const newScale = Math.max(prev.scale / 1.2, 1);
-            let newTx = prev.tx;
-            let newTy = prev.ty;
-            if (newScale === 1) {
-              newTx = 0;
-              newTy = 0;
-            } else {
-              newTx = Math.max(100 * (1 - newScale), Math.min(newTx, 0));
-              newTy = Math.max(100 * (1 - newScale), Math.min(newTy, 0));
-            }
-            return { ...prev, scale: newScale, tx: newTx, ty: newTy };
-          });
-          break;
-        case 'KeyZ':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
-          }
-          break;
-        case 'Digit0':
-        case 'Numpad0':
-          if (keysPressed.current['KeyR']) {
-            e.preventDefault();
-            rotationRef.current = 0;
-            setRotation(0);
-          }
-          break;
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current[e.code] = false;
-      setIsAltPressed(e.altKey);
-      if (!videoRef.current) return;
-
-      if (e.code === 'Space' || e.code === 'KeyK') {
-        if (spacePressTimer.current) {
-          clearTimeout(spacePressTimer.current);
-          spacePressTimer.current = null;
-        }
-        if (isSlowMoActive.current) {
-          isSlowMoActive.current = false;
-          videoRef.current.playbackRate = preSlowMoState.current.rate;
-          setPlaybackRate(preSlowMoState.current.rate);
-          if (!preSlowMoState.current.wasPlaying) {
-            videoRef.current.pause();
-            setIsPlaying(false);
+            lastRightArrowPressTime.current = now;
           }
         } else {
-          togglePlay();
+          const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
+          if (isTranscodedStream) {
+            seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) + 10);
+          } else {
+            videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+          }
         }
-      }
-
-      if (e.code === 'ArrowRight' || e.code === 'AltLeft' || e.code === 'AltRight') {
-        if (videoRef.current.playbackRate !== 1.0) {
-          videoRef.current.playbackRate = 1.0;
-          setPlaybackRate(1.0);
+        break;
+      case 'ArrowLeft':
+        // Blur any focused UI element (buttons, range sliders) so they
+        // can't intercept arrow keys — then seek as normal.
+        e.preventDefault();
+        if (document.activeElement && document.activeElement !== document.body) {
+          (document.activeElement as HTMLElement).blur();
         }
-      }
-    };
+        if (keysPressed.current['KeyR']) {
+          break;
+        }
+        const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
+        if (isTranscodedStream) {
+          seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) - 10);
+        } else {
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+        }
+        break;
+      case 'ArrowUp':
+        if (keysPressed.current['KeyR']) {
+          e.preventDefault();
+          rotationRef.current = 180;
+          setRotation(180);
+          break;
+        }
+        updateVolume(volumeRef.current + 0.05, true);
+        break;
+      case 'ArrowDown':
+        if (keysPressed.current['KeyR']) {
+          e.preventDefault();
+          rotationRef.current = 0;
+          setRotation(0);
+          break;
+        }
+        updateVolume(volumeRef.current - 0.05, true);
+        break;
+      case 'KeyM':
+        toggleMute();
+        break;
+      case 'KeyF':
+        toggleFullscreen();
+        break;
+      case 'Equal':
+      case 'NumpadAdd':
+        setZoomState(prev => {
+          const newScale = Math.min(prev.scale * 1.2, 10);
+          return { ...prev, scale: newScale };
+        });
+        break;
+      case 'Minus':
+      case 'NumpadSubtract':
+        setZoomState(prev => {
+          const newScale = Math.max(prev.scale / 1.2, 1);
+          let newTx = prev.tx;
+          let newTy = prev.ty;
+          if (newScale === 1) {
+            newTx = 0;
+            newTy = 0;
+          } else {
+            newTx = Math.max(100 * (1 - newScale), Math.min(newTx, 0));
+            newTy = Math.max(100 * (1 - newScale), Math.min(newTy, 0));
+          }
+          return { ...prev, scale: newScale, tx: newTx, ty: newTy };
+        });
+        break;
+      case 'KeyZ':
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
+        }
+        break;
+      case 'Digit0':
+      case 'Numpad0':
+        if (keysPressed.current['KeyR']) {
+          e.preventDefault();
+          rotationRef.current = 0;
+          setRotation(0);
+        }
+        break;
+    }
+  };
 
-    const handleBlur = () => {
-      keysPressed.current = {};
-      setIsAltPressed(false);
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleBlur);
+  const handleKeyUp = (e: KeyboardEvent) => {
+    keysPressed.current[e.code] = false;
+    setIsAltPressed(e.altKey);
+    if (!videoRef.current) return;
+
+    if (e.code === 'Space' || e.code === 'KeyK') {
+      if (spacePressTimer.current) {
+        clearTimeout(spacePressTimer.current);
+        spacePressTimer.current = null;
+      }
+      if (isSlowMoActive.current) {
+        isSlowMoActive.current = false;
+        videoRef.current.playbackRate = preSlowMoState.current.rate;
+        setPlaybackRate(preSlowMoState.current.rate);
+        if (!preSlowMoState.current.wasPlaying) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+      } else {
+        togglePlay();
+      }
+    }
+
+    if (e.code === 'ArrowRight' || e.code === 'AltLeft' || e.code === 'AltRight') {
+      if (videoRef.current.playbackRate !== 1.0) {
+        videoRef.current.playbackRate = 1.0;
+        setPlaybackRate(1.0);
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    keysPressed.current = {};
+    setIsAltPressed(false);
+  };
+
+  const handleKeyDownRef = useRef<typeof handleKeyDown>(handleKeyDown);
+  const handleKeyUpRef = useRef<typeof handleKeyUp>(handleKeyUp);
+  const handleBlurRef = useRef<typeof handleBlur>(handleBlur);
+
+  useEffect(() => {
+    handleKeyDownRef.current = handleKeyDown;
+    handleKeyUpRef.current = handleKeyUp;
+    handleBlurRef.current = handleBlur;
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => handleKeyDownRef.current(e);
+    const onKeyUp = (e: KeyboardEvent) => handleKeyUpRef.current(e);
+    const onBlur = () => handleBlurRef.current();
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
@@ -2111,8 +2125,10 @@ export default function App() {
     const clampedTime = Math.max(0, Math.min(streamDurationRef.current || Infinity, newTime));
     streamSeekOffsetRef.current = clampedTime;
     setCurrentTime(clampedTime);
-    const baseUrl = realVideoUrl.split('&start=')[0];
-    setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
+    if (realVideoUrl) {
+      const baseUrl = realVideoUrl.split('&start=')[0];
+      setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
+    }
   };
 
   const stopVideo = () => {
@@ -2136,7 +2152,7 @@ export default function App() {
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     
-    if (realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true')) {
+    if (realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true')) {
       seekTranscoded(time);
     } else {
       setCurrentTime(time);
