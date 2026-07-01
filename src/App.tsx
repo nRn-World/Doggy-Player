@@ -239,6 +239,124 @@ const translations = {
     shareCodeInfo: "Välj en 4-siffrig kod som kopplas till din inloggning. Ge koden till en vän, så kan de logga in automatiskt!",
     createActivationCode: "Skapa aktiveringskod",
     repairAudio: "Reparera ljud (Fixa MKV/AC3)"
+  },
+  tr: {
+    settings: "Ayarlar",
+    language: "Dil",
+    playback: "Oynatma",
+    autoplay: "Otomatik Oynat",
+    repeat: "Tekrarla",
+    shortcuts: "Klavye Kısayolları",
+    showShortcuts: "Kısayolları Göster",
+    about: "Hakkında",
+    version: "Sürüm",
+    playlist: "Oynatma Listesi",
+    hidePlaylist: "Oynatma Listesini Gizle",
+    togglePlaylist: "Oynatma Listesini Değiştir",
+    dropFiles: "İzlemeye başlamak için video dosyalarını buraya sürükleyip bırakın.",
+    chooseFiles: "Video dosyalarını seç",
+    openUrl: "URL Aç",
+    openUrlPlaceholder: "Video veya yayın URL'sini yapıştırın...",
+    dropPlaylist: "Oynatma listesi oluşturmak için sürükleyip bırakın",
+    scPlayPause: "Oynat/Duraklat (Ağır çekim için basılı tutun)",
+    scStop: "Durdur",
+    scFullscreen: "Tam Ekran",
+    scMute: "Sessiz",
+    scVolUp: "Sesi Aç",
+    scVolDown: "Sesi Kıs",
+    scForward: "10 saniye ileri",
+    scBackward: "10 saniye geri",
+    scFastForward: "Hızlı ileri sar (1.5x)",
+    scFastForward2x: "Hızlı ileri sar (2.0x) - çift tıklama",
+    scZoomIn: "Yakınlaştır",
+    scZoomOut: "Uzaklaştır",
+    scResetZoom: "Yakınlaştırmayı sıfırla",
+    scRotateRight: "Sağa döndür",
+    scRotateLeft: "Sola döndür",
+    scRotate180: "180 derece döndür",
+    scRotate0: "Döndürmeyi sıfırla",
+    scScreenshot: "Ekran görüntüsü",
+    copied: "Kopyalandı!",
+    copyEmail: "E-postayı kopyala",
+    rememberVolume: "Sesi hatırla",
+    muteOnStart: "Başlangıçta sessiz",
+    defaultSpeed: "Varsayılan hız",
+    resumePlayback: "Oynatmayı sürdür",
+    appearance: "Görünüm",
+    theme: "Tema",
+    themeBrown: "Kahverengi (Varsayılan)",
+    themeDark: "Koyu",
+    themeLight: "Açık",
+    autoHideControls: "Kontrolleri gizle",
+    playlistSettings: "Oynatma Listesi",
+    autoRemoveFinished: "Oynatılanları kaldır",
+    iptvQuality: "IPTV Standart Kalite",
+    iptvQualityAuto: "Otomatik (Önerilen)",
+    screenshotSaved: "Ekran görüntüsü kaydedildi!",
+    deleteFavorites: "Tüm favorileri sil",
+    deleteFavoritesConfirm: "Favoriler kategorisini silmek istediğinizden emin misiniz?",
+    equalizer: "Ekolayzer",
+    epg: "TV Rehberi",
+    epgUrl: "EPG URL",
+    epgNow: "Şu anda",
+    epgNext: "Sırada",
+    epgNoData: "Rehber verisi yok",
+    epgLoading: "Rehber yükleniyor...",
+    play: "Oynat",
+    pause: "Duraklat",
+    stop: "Durdur",
+    previous: "Önceki",
+    nextVideo: "Sonraki Video",
+    exitApp: "Çıkış",
+    fullscreen: "Tam Ekran",
+    windowscreen: "Pencere modu",
+    iptv: "IPTV",
+    files: "Dosyalar",
+    login: "Giriş yap",
+    url: "Sunucu URL'si",
+    username: "Kullanıcı adı",
+    password: "Şifre",
+    connect: "Bağlan",
+    categories: "Kategoriler",
+    searching: "Aranıyor...",
+    noChannels: "Hiçbir şey bulunamadı",
+    logout: "Çıkış yap",
+    streams: "Yayınlar",
+    all: "Hepsi",
+    searchPlaceholder: "Ara...",
+    iptvLoginRequired: "Lütfen IPTV için giriş yapın.",
+    live: "Canlı TV",
+    movies: "Filmer",
+    series: "Diziler",
+    itemsPerPage: "Sayfa başına kanal",
+    seasons: "Sezonlar",
+    episodes: "Bölümler",
+    loadingInfo: "Yükleniyor...",
+    allCategories: "Tüm Kategoriler",
+    newCategoryLabel: "Yeni kategori",
+    enterCategoryName: "Yeni kategori adını girin:",
+    categoryExists: "Kategori zaten mevcut",
+    deleteCategoryConfirm: 'Kategoriyi silmek istediğinizden emin misiniz? "{name}"?',
+    enterNewName: "Yeni isim girin:",
+    categoryNameExists: "Kategori adı zaten mevcut",
+    emptyCategory: "Boş kategori",
+    noFavorites: "Kayıtlı favori veya kategori yok",
+    updateAvailableTitle: "Güncelleme mevcut",
+    downloadingUpdate: "Arka planda indiriliyor...",
+    updateReadyTitle: "Güncelleme tamamlandı",
+    restartToUpdate: "Yeni sürümü yüklemek için yeniden başlatın.",
+    restart: "Yeniden başlat",
+    favoritesLabel: "Favoriler",
+    standardLabel: "Varsayılan",
+    noCategoriesCreated: "Hiç kategori oluşturulmadı",
+    activationCodeTitle: "Aktivasyon kodunu girin",
+    renderLimit: "İşleme sınırı",
+    activateAndLogin: "Etkinleştir ve Giriş yap",
+    loading: "Yükleniyor...",
+    saveCode: "Kodu kaydet",
+    shareCodeInfo: "Girişinize bağlanacak 4 haneli bir kod seçin. Kodu bir arkadaşınıza verin, böylece otomatik olarak giriş yapabilirler!",
+    createActivationCode: "Aktivasyon kodu oluştur",
+    repairAudio: "Sesi onar (MKV/AC3 düzelt)"
   }
 };
 
@@ -443,9 +561,9 @@ export default function App() {
   const [autoplay, setAutoplay] = useState(() => localStorage.getItem('cinelens_autoplay') === 'true');
   const [repeat, setRepeat] = useState<'off' | 'all' | 'one'>('off');
   const [shuffle, setShuffle] = useState(false);
-  const [language, setLanguage] = useState<'sv' | 'en'>(() => {
+  const [language, setLanguage] = useState<'sv' | 'en' | 'tr'>(() => {
     const saved = localStorage.getItem('cinelens_language');
-    return (saved === 'sv' || saved === 'en') ? saved : 'en';
+    return (saved === 'sv' || saved === 'en' || saved === 'tr') ? saved : 'en';
   });
 
   const [rememberVolume, setRememberVolume] = useState(() => localStorage.getItem('cinelens_rememberVolume') === 'true');
@@ -3594,11 +3712,12 @@ export default function App() {
                 <div className="relative w-32">
                   <select 
                     value={language}
-                    onChange={(e) => setLanguage(e.target.value as 'sv' | 'en')}
+                    onChange={(e) => setLanguage(e.target.value as 'sv' | 'en' | 'tr')}
                     className="w-full appearance-none bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
                   >
                     <option value="sv" className="bg-theme-bg text-theme-text">Svenska</option>
                     <option value="en" className="bg-theme-bg text-theme-text">English</option>
+                    <option value="tr" className="bg-theme-bg text-theme-text">Türkçe</option>
                   </select>
                   <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
                 </div>
