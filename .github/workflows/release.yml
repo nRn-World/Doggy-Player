@@ -50,6 +50,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             release/*.exe
             release/*.exe.blockmap
@@ -62,6 +63,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             release/*.dmg
             release/*.zip
@@ -73,6 +75,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             release/*.AppImage
             release/latest-linux.yml

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload, Camera, SlidersHorizontal, Tv2, Activity, FolderPlus, FolderEdit, FolderMinus, FolderOpen, MoreVertical, Edit3 } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload, Camera, SlidersHorizontal, Tv2, Activity, FolderPlus, FolderEdit, FolderMinus, FolderOpen, MoreVertical, Edit3, Lock, Unlock } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -384,6 +384,29 @@ const readStoredArray = <T,>(key: string): T[] => {
   }
 };
 
+const VIDEO_ROTATION_LOCKS_KEY = 'doggy_video_rotation_locks';
+
+const readVideoRotationLocks = (): Record<string, number> => {
+  try {
+    const value = JSON.parse(localStorage.getItem(VIDEO_ROTATION_LOCKS_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveVideoRotationLock = (videoKey: string, rotation: number) => {
+  const locks = readVideoRotationLocks();
+  locks[videoKey] = rotation;
+  localStorage.setItem(VIDEO_ROTATION_LOCKS_KEY, JSON.stringify(locks));
+};
+
+const removeVideoRotationLock = (videoKey: string) => {
+  const locks = readVideoRotationLocks();
+  delete locks[videoKey];
+  localStorage.setItem(VIDEO_ROTATION_LOCKS_KEY, JSON.stringify(locks));
+};
+
 const parseXmlTvTime = (value: string): number => {
   const match = value.trim().match(
     /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/
@@ -401,10 +424,11 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
-  const [playlist, setPlaylist] = useState<{id: string, name: string, url: string}[]>([]);
+  const [playlist, setPlaylist] = useState<{id: string, name: string, url: string, rotationStorageKey?: string}[]>([]);
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const [currentIndex, setCurrentIndex] = useState(0);
   const videoSrc = playlist[currentIndex]?.url || null;
+  const videoRotationKey = playlist[currentIndex]?.rotationStorageKey || videoSrc;
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [realVideoUrl, setRealVideoUrl] = useState<string | null>(null);
@@ -1364,6 +1388,8 @@ export default function App() {
   }, [videoSrc, defaultSpeed]);
 
   const t = translations[language];
+  const lockRotationLabel = language === 'sv' ? 'L\u00e5s rotationen f\u00f6r den h\u00e4r videon' : 'Lock rotation for this video';
+  const unlockRotationLabel = language === 'sv' ? 'L\u00e5s upp den sparade rotationen' : 'Unlock saved rotation';
 
   // Zoom Selection State
   const [isSelecting, setIsSelecting] = useState(false);
@@ -1449,27 +1475,47 @@ export default function App() {
 
   const keysPressed = useRef<{ [key: string]: boolean }>({});
   const [rotation, setRotation] = useState(0);
+  const [isRotationLocked, setIsRotationLocked] = useState(false);
+  const [showRotationLockControl, setShowRotationLockControl] = useState(false);
   const rotationRef = useRef(0);
-  const requestRef = useRef<number | null>(null);
+
+  const applyVideoRotation = (nextRotation: number) => {
+    rotationRef.current = nextRotation;
+    setRotation(nextRotation);
+    setShowRotationLockControl(nextRotation !== 0);
+    if (isRotationLocked && videoRotationKey) {
+      saveVideoRotationLock(videoRotationKey, nextRotation);
+    }
+  };
+
+  const toggleRotationLock = () => {
+    if (!videoRotationKey) return;
+    if (isRotationLocked) {
+      removeVideoRotationLock(videoRotationKey);
+      setIsRotationLocked(false);
+    } else {
+      saveVideoRotationLock(videoRotationKey, rotationRef.current);
+      setIsRotationLocked(true);
+    }
+  };
 
   useEffect(() => {
-    const updateRotation = () => {
-      if (keysPressed.current['KeyR']) {
-        if (keysPressed.current['ArrowRight']) {
-          rotationRef.current += 0.1;
-          setRotation(rotationRef.current);
-        } else if (keysPressed.current['ArrowLeft']) {
-          rotationRef.current -= 0.1;
-          setRotation(rotationRef.current);
-        }
-      }
-      requestRef.current = requestAnimationFrame(updateRotation);
-    };
-    requestRef.current = requestAnimationFrame(updateRotation);
-    return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    };
-  }, []);
+    if (!videoRotationKey) {
+      rotationRef.current = 0;
+      setRotation(0);
+      setIsRotationLocked(false);
+      setShowRotationLockControl(false);
+      return;
+    }
+
+    const savedRotation = readVideoRotationLocks()[videoRotationKey];
+    const hasSavedRotation = typeof savedRotation === 'number' && Number.isFinite(savedRotation);
+    const nextRotation = hasSavedRotation ? savedRotation : 0;
+    rotationRef.current = nextRotation;
+    setRotation(nextRotation);
+    setIsRotationLocked(hasSavedRotation);
+    setShowRotationLockControl(false);
+  }, [videoRotationKey]);
 
   const zoomRectRef = useRef(zoomRect);
   useEffect(() => {
@@ -1484,7 +1530,6 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const lastRightArrowPressTime = useRef(0);
 
   // Handle File Upload
   const handleFiles = (files: FileList | File[]) => {
@@ -1503,7 +1548,8 @@ export default function App() {
       return {
         id: Math.random().toString(36).substring(2, 9),
         name: file.name,
-        url
+        url,
+        rotationStorageKey: localPath || `browser-file:${file.name}:${file.size}:${file.lastModified}`
       };
     });
 
@@ -1896,8 +1942,7 @@ export default function App() {
         if (num === 0) {
           setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 });
           setZoomRect(null);
-          rotationRef.current = 0;
-          setRotation(0);
+          applyVideoRotation(0);
         } else {
           const targetScale = num * 10;
           setZoomState(prev => {
@@ -1922,12 +1967,8 @@ export default function App() {
       }
     }
 
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-      if (keysPressed.current['KeyR']) {
-        e.preventDefault();
-      } else if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
-        e.preventDefault();
-      }
+    if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) {
+      e.preventDefault();
     }
 
     switch (e.code) {
@@ -1967,21 +2008,8 @@ export default function App() {
         if (document.activeElement && document.activeElement !== document.body) {
           (document.activeElement as HTMLElement).blur();
         }
-        if (keysPressed.current['KeyR']) {
-          break;
-        }
         if (e.altKey) {
-          if (!e.repeat) {
-            const now = Date.now();
-            if (now - lastRightArrowPressTime.current < 400) {
-              videoRef.current.playbackRate = 2.0;
-              setPlaybackRate(2.0);
-            } else {
-              videoRef.current.playbackRate = 1.5;
-              setPlaybackRate(1.5);
-            }
-            lastRightArrowPressTime.current = now;
-          }
+          if (!e.repeat) applyVideoRotation(rotationRef.current + 90);
         } else {
           const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
           if (isTranscodedStream) {
@@ -1998,7 +2026,8 @@ export default function App() {
         if (document.activeElement && document.activeElement !== document.body) {
           (document.activeElement as HTMLElement).blur();
         }
-        if (keysPressed.current['KeyR']) {
+        if (e.altKey) {
+          if (!e.repeat) applyVideoRotation(rotationRef.current - 90);
           break;
         }
         const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
@@ -2009,19 +2038,17 @@ export default function App() {
         }
         break;
       case 'ArrowUp':
-        if (keysPressed.current['KeyR']) {
+        if (e.altKey) {
           e.preventDefault();
-          rotationRef.current = 180;
-          setRotation(180);
+          if (!e.repeat) applyVideoRotation(180);
           break;
         }
         updateVolume(volumeRef.current + 0.05, true);
         break;
       case 'ArrowDown':
-        if (keysPressed.current['KeyR']) {
+        if (e.altKey) {
           e.preventDefault();
-          rotationRef.current = 0;
-          setRotation(0);
+          if (!e.repeat) applyVideoRotation(0);
           break;
         }
         updateVolume(volumeRef.current - 0.05, true);
@@ -2095,12 +2122,6 @@ export default function App() {
       }
     }
 
-    if (e.code === 'ArrowRight' || e.code === 'AltLeft' || e.code === 'AltRight') {
-      if (videoRef.current.playbackRate !== 1.0) {
-        videoRef.current.playbackRate = 1.0;
-        setPlaybackRate(1.0);
-      }
-    }
   };
 
   const handleBlur = () => {
@@ -2404,7 +2425,7 @@ export default function App() {
     transformStyle = {
       transform: `translate(${zoomState.tx}%, ${zoomState.ty}%) scale(${zoomState.scale}) translate(50%, 50%) rotate(${rotation}deg) translate(-50%, -50%)`,
       transformOrigin: `0 0`,
-      transition: (isSelecting || keysPressed.current['KeyR']) ? 'none' : 'transform 0.1s ease-out'
+      transition: (isSelecting || keysPressed.current['AltLeft'] || keysPressed.current['AltRight']) ? 'none' : 'transform 0.1s ease-out'
     };
   }
 
@@ -2914,14 +2935,26 @@ export default function App() {
               <div className="absolute top-4 left-4 bg-theme-bg/80 backdrop-blur-sm px-4 py-2 rounded-lg text-theme-text flex items-center gap-2 z-50 shadow-sm border border-theme-border">
                 {zoomState.scale > 1 && <span className="text-xl font-bold">Zoom: {zoomState.scale.toFixed(1)}x</span>}
                 {zoomState.scale > 1 && rotation !== 0 && <span className="text-xl font-bold text-theme-text-muted">|</span>}
-                {rotation !== 0 && <span className="text-xl font-bold">Rot: {(((rotation % 360) + 360) % 360).toFixed(1)}&deg;</span>}
+                {rotation !== 0 && <span className="text-xl font-bold">Rot: {(((rotation % 360) + 360) % 360).toFixed(0)}&deg;</span>}
+                {showRotationLockControl && rotation !== 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleRotationLock();
+                    }}
+                    className={`ml-1 p-1 rounded transition-colors ${isRotationLocked ? 'text-theme-accent bg-theme-accent/15' : 'text-theme-text-muted hover:text-theme-accent'}`}
+                    title={isRotationLocked ? unlockRotationLabel : lockRotationLabel}
+                    aria-label={isRotationLocked ? unlockRotationLabel : lockRotationLabel}
+                  >
+                    {isRotationLocked ? <Lock size={21} /> : <Unlock size={21} />}
+                  </button>
+                )}
                 <button 
                   onClick={(e) => { 
                     e.stopPropagation(); 
                     setZoomState({ scale: 1, tx: 0, ty: 0, vcX: 50, vcY: 50 }); 
                     setZoomRect(null); 
-                    rotationRef.current = 0;
-                    setRotation(0);
+                    applyVideoRotation(0);
                   }}
                   className="ml-2 hover:text-theme-accent transition-colors"
                 >
@@ -4000,15 +4033,13 @@ export default function App() {
                   { keys: ['↓'], desc: t.scVolDown },
                   { keys: ['←'], desc: t.scBackward },
                   { keys: ['→'], desc: t.scForward },
-                  { keys: ['Alt', '+', '→'], desc: t.scFastForward },
-                  { keys: ['Alt', '+', '→', '→'], desc: t.scFastForward2x },
                   { keys: ['+', '/', '='], desc: t.scZoomIn },
                   { keys: ['-'], desc: t.scZoomOut },
                   { keys: ['Ctrl', '+', 'Z'], desc: t.scResetZoom },
-                  { keys: ['R', '+', '→'], desc: t.scRotateRight },
-                  { keys: ['R', '+', '←'], desc: t.scRotateLeft },
-                  { keys: ['R', '+', '↑'], desc: t.scRotate180 },
-                  { keys: ['R', '+', '↓', '/', '0'], desc: t.scRotate0 },
+                  { keys: ['Alt', '+', '→'], desc: t.scRotateRight },
+                  { keys: ['Alt', '+', '←'], desc: t.scRotateLeft },
+                  { keys: ['Alt', '+', '↑'], desc: t.scRotate180 },
+                  { keys: ['Alt', '+', '↓'], desc: t.scRotate0 },
                   { keys: ['Alt', '+', 'S'], desc: t.scScreenshot },
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between p-3 hover:bg-theme-bg-tertiary rounded-lg transition-colors">

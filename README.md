@@ -24,17 +24,19 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
-*   **🔍 Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
-*   **🎯 Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
-*   **🔄 Instant Rotation**: Fix sideways videos with a single click (`R`).
-*   **⚡ Dynamic Speed Control**: Instant slow-mo (hold Play) or 1.5x speed (`ALT + →`).
-*   **📂 Smart Playlist**: Drag & drop support with optional "Auto-remove finished".
-*   **📺 IPTV Support**: Xtream Codes, M3U, and EPG support built-in.
-*   **🎬 Subtitle Engine**: Support for `.srt`, `.vtt`, `.ass`, and more with sync offset.
-*   **📸 Screenshot**: Capture frames instantly with `Alt+S`.
-*   **🎚️ Equalizer**: Professional audio control with ±12dB adjustment.
+* **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
+* **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
+* **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
+* **Per-Video Rotation Lock**: Save a manual rotation for a specific video and automatically restore it whenever that video is opened again.
+* **Clean Rotation UI**: The rotation lock appears only after the user manually rotates the video in Doggy Player, not because of a video's built-in orientation metadata.
+* **Dynamic Playback Control**: Play, pause, seek, adjust volume, and use press-and-hold slow motion.
+* **Smart Playlist**: Drag-and-drop support with optional automatic removal of finished videos.
+* **IPTV Support**: Xtream Codes, M3U, and EPG support built in.
+* **Subtitle Engine**: Support for `.srt`, `.vtt`, `.ass`, and additional subtitle formats with synchronization offset.
+* **Screenshot Capture**: Capture frames instantly with `Alt + S`.
+* **Equalizer**: Professional audio control with +/-12 dB adjustment.
 
 ---
 
@@ -118,9 +120,12 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 
 ---
 
-## ✨ Release Notes v1.1.42
+## Release Notes v1.1.61
 
-This release addresses two user requests to improve the experience:
+Doggy Player v1.1.61 adds persistent, per-video rotation preferences and improves rotation controls:
 
-*   🎬 **Automatic video playback:** When you open a standard video file (e.g. `.mp4`), playback starts immediately (also applies to “Open with”, drag & drop, and “Choose video files”).
-*   🎨 **Sidebar hidden by default:** The sidebar is now hidden on startup, giving a cleaner interface from the beginning.
+* **New rotation shortcuts:** Use `Alt + Right/Left` to rotate by 90 degrees, `Alt + Up` for 180 degrees, and `Alt + Down` to reset the rotation.
+* **Per-video rotation lock:** After manually rotating a video, lock the selected angle so Doggy Player automatically restores it the next time the same video is opened.
+* **Context-aware lock visibility:** The lock control appears only after a manual rotation inside Doggy Player. Videos with built-in 90-degree or 270-degree orientation metadata do not display the lock by default.
+* **Persistent local storage:** Locked rotations are stored locally on the device and remain available across application restarts.
+* **Updated documentation:** Keyboard shortcuts and rotation behavior in the README now match the current application.
