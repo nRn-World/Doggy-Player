@@ -375,6 +375,26 @@ const CustomLogo = ({ className, size = 24 }: { className?: string, size?: numbe
   );
 };
 
+const readStoredArray = <T,>(key: string): T[] => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+};
+
+const parseXmlTvTime = (value: string): number => {
+  const match = value.trim().match(
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/
+  );
+  if (!match) return Number.NaN;
+  const [, year, month, day, hour, minute, second, sign, offsetHour, offsetMinute] = match;
+  const utc = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  if (!sign) return utc / 1000;
+  const offsetMs = (Number(offsetHour) * 60 + Number(offsetMinute)) * 60_000;
+  return (utc - (sign === '+' ? offsetMs : -offsetMs)) / 1000;
+};
 export default function App() {
   const appRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -382,6 +402,7 @@ export default function App() {
   const hlsRef = useRef<Hls | null>(null);
 
   const [playlist, setPlaylist] = useState<{id: string, name: string, url: string}[]>([]);
+  const blobUrlsRef = useRef<Set<string>>(new Set());
   const [currentIndex, setCurrentIndex] = useState(0);
   const videoSrc = playlist[currentIndex]?.url || null;
   const [isPlaying, setIsPlaying] = useState(false);
@@ -768,12 +789,13 @@ export default function App() {
   const [showIptvOverlay, setShowIptvOverlay] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
   interface FavoriteFolder { name: string; items: string[]; color?: string; }
-  const [favorites, setFavorites] = useState<string[]>(() => JSON.parse(localStorage.getItem('doggy_iptv_favorites') || '[]'));
+  const [favorites, setFavorites] = useState<string[]>(() => readStoredArray<string>('doggy_iptv_favorites'));
   const [favoriteFolders, setFavoriteFolders] = useState<FavoriteFolder[]>(() => {
-    const saved = localStorage.getItem('doggy_iptv_folders');
-    const folders = saved ? JSON.parse(saved) : [];
+    const folders = readStoredArray<FavoriteFolder>('doggy_iptv_folders');
     // Migrate: ensure all have a color
-    return folders.map((f: any) => ({ ...f, color: f.color || '#ff4b4b' }));
+    return folders
+      .filter(f => f && typeof f.name === 'string' && Array.isArray(f.items))
+      .map(f => ({ ...f, color: f.color || '#ff4b4b' }));
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPromptModal, setShowPromptModal] = useState(false);
@@ -1176,15 +1198,25 @@ export default function App() {
   useEffect(() => {
     try {
       const { ipcRenderer } = (window as any).require('electron');
-      ipcRenderer.on('update-available', () => setUpdateAvailable(true));
-      ipcRenderer.on('update-downloaded', () => {
+      const onUpdateAvailable = () => setUpdateAvailable(true);
+      const onUpdateDownloaded = () => {
         setUpdateAvailable(false);
         setUpdateDownloaded(true);
-      });
-      ipcRenderer.on('update-error', (_: any, msg: string) => {
+      };
+      const onUpdateError = (_: any, msg: string) => {
         console.error('Update error:', msg);
         // Silent error to avoid annoying users with firewall/network issues
-      });
+      };
+
+      ipcRenderer.on('update-available', onUpdateAvailable);
+      ipcRenderer.on('update-downloaded', onUpdateDownloaded);
+      ipcRenderer.on('update-error', onUpdateError);
+
+      return () => {
+        ipcRenderer.removeListener('update-available', onUpdateAvailable);
+        ipcRenderer.removeListener('update-downloaded', onUpdateDownloaded);
+        ipcRenderer.removeListener('update-error', onUpdateError);
+      };
     } catch {
       // not in electron
     }
@@ -1464,11 +1496,16 @@ export default function App() {
     });
     if (videoFiles.length === 0) return;
 
-    const newItems = videoFiles.map(file => ({
-      id: Math.random().toString(36).substring(2, 9),
-      name: file.name,
-      url: (file as any).path || URL.createObjectURL(file)
-    }));
+    const newItems = videoFiles.map(file => {
+      const localPath = (file as any).path;
+      const url = localPath || URL.createObjectURL(file);
+      if (!localPath) blobUrlsRef.current.add(url);
+      return {
+        id: Math.random().toString(36).substring(2, 9),
+        name: file.name,
+        url
+      };
+    });
 
     setPlaylist(prev => {
       const updated = [...prev, ...newItems];
@@ -1493,6 +1530,23 @@ export default function App() {
       return updated;
     });
   };
+
+  useEffect(() => {
+    const activeUrls = new Set(playlist.map(item => item.url));
+    for (const url of blobUrlsRef.current) {
+      if (!activeUrls.has(url)) {
+        URL.revokeObjectURL(url);
+        blobUrlsRef.current.delete(url);
+      }
+    }
+  }, [playlist]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of blobUrlsRef.current) URL.revokeObjectURL(url);
+      blobUrlsRef.current.clear();
+    };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) handleFiles(e.target.files);
@@ -1784,19 +1838,13 @@ export default function App() {
       const doc = parser.parseFromString(xml, 'text/xml');
       const programmes = doc.querySelectorAll('programme');
       const data: EpgChannel = {};
-      const parseTime = (s: string) => {
-        // Format: 20240101120000 +0000
-        const clean = s.replace(/\s.*/, '');
-        const y = clean.slice(0,4), mo = clean.slice(4,6), d = clean.slice(6,8);
-        const h = clean.slice(8,10), mi = clean.slice(10,12), sec = clean.slice(12,14);
-        return new Date(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`).getTime() / 1000;
-      };
       programmes.forEach(p => {
         const ch = p.getAttribute('channel') || '';
-        const start = parseTime(p.getAttribute('start') || '0');
-        const end = parseTime(p.getAttribute('stop') || '0');
+        const start = parseXmlTvTime(p.getAttribute('start') || '');
+        const end = parseXmlTvTime(p.getAttribute('stop') || '');
         const title = p.querySelector('title')?.textContent || '';
         const desc = p.querySelector('desc')?.textContent || '';
+        if (!ch || !Number.isFinite(start) || !Number.isFinite(end)) return;
         if (!data[ch]) data[ch] = [];
         data[ch].push({ start, end, title, desc });
       });
@@ -2687,8 +2735,9 @@ export default function App() {
                 <div
                   className="text-white text-center text-lg font-semibold leading-snug px-4 py-1.5 rounded-lg"
                   style={{ background: 'rgba(0,0,0,0.72)', textShadow: '0 1px 4px rgba(0,0,0,0.9)', maxWidth: '80%', whiteSpace: 'pre-line' }}
-                  dangerouslySetInnerHTML={{ __html: currentCue.text.replace(/\n/g, '<br/>') }}
-                />
+                >
+                  {currentCue.text}
+                </div>
               </div>
             )}
 
