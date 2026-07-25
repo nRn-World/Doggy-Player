@@ -92,7 +92,7 @@ function createWindow() {
     width: 1200,
     height: 800,
     show: false,
-    icon: path.join(__dirname, '../Logo Bilder/logoW-cropped-no-bg.png'),
+    icon: path.join(__dirname, '../Logo Bilder/logoW-cropped-no-bg1024x1024.png'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,

@@ -46,4 +46,4 @@ To get the project running locally, follow these steps:
 
 ---
 
-By contributing, you agree that your contributions will be licensed under the project's [Non-Commercial License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the project's [Non-Commercial License](LICENSE.txt).
