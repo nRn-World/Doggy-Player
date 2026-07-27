@@ -1,17 +1,13 @@
-# Doggy Player v1.1.61
+# Doggy Player v1.1.62
 
-This release adds persistent, per-video rotation preferences and improves the rotation workflow.
+This release improves distraction-free video playback with synchronized auto-hiding controls and cursor behavior.
 
-## What's New
+## What's Changed
 
-- Use **Alt + Right/Left** to rotate a video by 90 degrees.
-- Use **Alt + Up** to rotate to 180 degrees.
-- Use **Alt + Down** to reset the video to its original rotation.
-- A rotation lock now appears only after the user manually rotates a video inside Doggy Player.
-- Lock a selected angle to automatically restore that rotation whenever the same video is opened again.
-- Videos that already contain 90-degree or 270-degree orientation metadata do not show the rotation lock by default.
-- Locked rotations are stored locally and persist across application restarts.
-- Updated the keyboard shortcut documentation and README.
+- Player controls now automatically hide after five seconds of mouse inactivity.
+- The mouse cursor now hides together with the player controls.
+- Moving the mouse immediately restores both the cursor and player controls.
+- Auto-hide remains active only while a video is playing, so controls stay visible while paused.
 
 ## Upgrade
 

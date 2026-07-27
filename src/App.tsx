@@ -1335,7 +1335,7 @@ export default function App() {
         clearTimeout(controlsTimeoutRef.current);
       }
       
-      const hideDelay = isFullscreen ? 10000 : autoHideControls;
+      const hideDelay = 5000;
       
       if (hideDelay > 0) {
         controlsTimeoutRef.current = setTimeout(() => {
@@ -1347,7 +1347,7 @@ export default function App() {
     };
 
     const handleMouseLeave = () => {
-      const hideDelay = isFullscreen ? 10000 : autoHideControls;
+      const hideDelay = 5000;
       if (hideDelay > 0 && isPlaying) {
         setIsControlsVisible(false);
       }
@@ -1370,7 +1370,7 @@ export default function App() {
         clearTimeout(controlsTimeoutRef.current);
       }
     };
-  }, [autoHideControls, isPlaying, isFullscreen]);
+  }, [isPlaying]);
 
   // Save progress
   useEffect(() => {
@@ -2465,7 +2465,7 @@ export default function App() {
         <div 
           className="flex-1 relative overflow-hidden flex items-center justify-center bg-black"
         ref={containerRef}
-        style={{ cursor: cursorStyle }}
+        style={{ cursor: !isControlsVisible && isPlaying ? 'none' : cursorStyle }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
