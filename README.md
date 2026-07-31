@@ -31,6 +31,9 @@ This project is licensed under the **nRn World Non-Commercial License**.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
 * **Per-Video Rotation Lock**: Save a manual rotation for a specific video and automatically restore it whenever that video is opened again.
 * **Clean Rotation UI**: The rotation lock appears only after the user manually rotates the video in Doggy Player, not because of a video's built-in orientation metadata.
+* **Video Brightness Control**: Adjust the active video from 50% to 150% brightness without modifying the original media file.
+* **Per-Video Brightness Lock**: Lock a brightness level for a specific video and automatically restore it the next time that video is opened.
+* **Brightness Shortcuts**: Press `Ctrl + Arrow Up` or `Ctrl + Arrow Down` to adjust brightness in 5% steps with an on-video percentage indicator.
 * **Dynamic Playback Control**: Play, pause, seek, adjust volume, and use press-and-hold slow motion.
 * **Smart Playlist**: Drag-and-drop support with optional automatic removal of finished videos.
 * **IPTV Support**: Xtream Codes, M3U, and EPG support built in.
@@ -120,12 +123,13 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 
 ---
 
-## Release Notes v1.1.62
+## Release Notes v1.1.63
 
-Doggy Player v1.1.62 improves distraction-free playback by synchronizing the player controls and mouse cursor:
+Doggy Player v1.1.63 adds flexible video brightness controls with per-video persistence:
 
-* **Five-second auto-hide:** Player controls now hide after five seconds of mouse inactivity while a video is playing.
-* **Auto-hiding cursor:** The mouse cursor hides together with the player controls.
-* **Instant restore:** Moving the mouse immediately restores both the cursor and player controls.
-* **Pause-aware behavior:** Auto-hide is active only during playback, so the controls and cursor remain visible while paused.
-* **Automatic update:** Existing installations receive v1.1.62 through Doggy Player's built-in updater.
+* **Brightness adjustment:** Make the active video darker or brighter from 50% to 150%.
+* **Visible percentage:** The current brightness percentage is displayed in the player controls and as an on-video indicator while adjusting.
+* **Keyboard control:** Use `Ctrl + Arrow Up` and `Ctrl + Arrow Down` to change brightness in 5% steps.
+* **Per-video lock:** Lock a brightness value for one video and automatically restore it whenever that video is opened again.
+* **Non-destructive processing:** Brightness affects playback only and never modifies the original video file.
+* **Automatic update:** Existing installations receive v1.1.63 through Doggy Player's built-in updater after the release assets are published.

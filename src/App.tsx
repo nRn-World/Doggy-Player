@@ -40,6 +40,14 @@ const translations = {
     scRotate180: "Rotate 180°",
     scRotate0: "Reset rotation",
     scScreenshot: "Screenshot",
+    scBrightnessUp: "Increase brightness",
+    scBrightnessDown: "Decrease brightness",
+    brightness: "Brightness",
+    resetBrightness: "Reset to 100%",
+    lockBrightness: "Lock brightness for this video",
+    unlockBrightness: "Unlock saved brightness",
+    brightnessLocked: "Locked for this video",
+    brightnessUnlocked: "Not locked",
     copied: "Copied!",
     copyEmail: "Copy email",
     rememberVolume: "Remember volume",
@@ -158,6 +166,14 @@ const translations = {
     scRotate180: "Rotera 180°",
     scRotate0: "Återställ rotation",
     scScreenshot: "Skärmdump",
+    scBrightnessUp: "Öka ljusstyrkan",
+    scBrightnessDown: "Minska ljusstyrkan",
+    brightness: "Ljusstyrka",
+    resetBrightness: "Återställ till 100 %",
+    lockBrightness: "Lås ljusstyrkan för den här videon",
+    unlockBrightness: "Lås upp den sparade ljusstyrkan",
+    brightnessLocked: "Låst för den här videon",
+    brightnessUnlocked: "Inte låst",
     copied: "Kopierad!",
     copyEmail: "Kopiera e-post",
     rememberVolume: "Kom ihåg volym",
@@ -276,6 +292,14 @@ const translations = {
     scRotate180: "180 derece döndür",
     scRotate0: "Döndürmeyi sıfırla",
     scScreenshot: "Ekran görüntüsü",
+    scBrightnessUp: "Parlaklığı artır",
+    scBrightnessDown: "Parlaklığı azalt",
+    brightness: "Parlaklık",
+    resetBrightness: "100% olarak sıfırla",
+    lockBrightness: "Bu video için parlaklığı kilitle",
+    unlockBrightness: "Kayıtlı parlaklığın kilidini aç",
+    brightnessLocked: "Bu video için kilitli",
+    brightnessUnlocked: "Kilitli değil",
     copied: "Kopyalandı!",
     copyEmail: "E-postayı kopyala",
     rememberVolume: "Sesi hatırla",
@@ -385,6 +409,7 @@ const readStoredArray = <T,>(key: string): T[] => {
 };
 
 const VIDEO_ROTATION_LOCKS_KEY = 'doggy_video_rotation_locks';
+const VIDEO_BRIGHTNESS_LOCKS_KEY = 'doggy_video_brightness_locks';
 
 const readVideoRotationLocks = (): Record<string, number> => {
   try {
@@ -405,6 +430,46 @@ const removeVideoRotationLock = (videoKey: string) => {
   const locks = readVideoRotationLocks();
   delete locks[videoKey];
   localStorage.setItem(VIDEO_ROTATION_LOCKS_KEY, JSON.stringify(locks));
+};
+
+const normalizeBrightness = (value: number) => {
+  const finiteValue = Number.isFinite(value) ? value : 1;
+  return Number(Math.min(1.5, Math.max(0.5, finiteValue)).toFixed(2));
+};
+
+const readVideoBrightnessLocks = (): Record<string, number> => {
+  try {
+    const value = JSON.parse(localStorage.getItem(VIDEO_BRIGHTNESS_LOCKS_KEY) || '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]))
+        .map(([key, brightness]) => [key, normalizeBrightness(brightness)])
+    );
+  } catch {
+    return {};
+  }
+};
+
+const saveVideoBrightnessLock = (videoKey: string, brightness: number) => {
+  try {
+    const locks = readVideoBrightnessLocks();
+    locks[videoKey] = normalizeBrightness(brightness);
+    localStorage.setItem(VIDEO_BRIGHTNESS_LOCKS_KEY, JSON.stringify(locks));
+  } catch {
+    // Brightness still works for this session if storage is unavailable.
+  }
+};
+
+const removeVideoBrightnessLock = (videoKey: string) => {
+  try {
+    const locks = readVideoBrightnessLocks();
+    delete locks[videoKey];
+    localStorage.setItem(VIDEO_BRIGHTNESS_LOCKS_KEY, JSON.stringify(locks));
+  } catch {
+    // Keep the in-memory unlocked state if storage is unavailable.
+  }
 };
 
 const parseXmlTvTime = (value: string): number => {
@@ -429,6 +494,7 @@ export default function App() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const videoSrc = playlist[currentIndex]?.url || null;
   const videoRotationKey = playlist[currentIndex]?.rotationStorageKey || videoSrc;
+  const videoBrightnessKey = videoRotationKey;
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [realVideoUrl, setRealVideoUrl] = useState<string | null>(null);
@@ -1786,6 +1852,89 @@ export default function App() {
 
   // ── Screenshot ──────────────────────────────────────────────────
   const [screenshotFlash, setScreenshotFlash] = useState(false);
+  const [brightness, setBrightness] = useState(1);
+  const [isBrightnessLocked, setIsBrightnessLocked] = useState(false);
+  const [showBrightnessIndicator, setShowBrightnessIndicator] = useState(false);
+  const [showBrightnessMenu, setShowBrightnessMenu] = useState(false);
+  const brightnessRef = useRef(1);
+  const isBrightnessLockedRef = useRef(false);
+  const brightnessIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const brightnessMenuRef = useRef<HTMLDivElement>(null);
+
+  const applyVideoBrightness = (nextValue: number, showIndicator = false) => {
+    const nextBrightness = normalizeBrightness(nextValue);
+    brightnessRef.current = nextBrightness;
+    setBrightness(nextBrightness);
+
+    if (isBrightnessLockedRef.current && videoBrightnessKey) {
+      saveVideoBrightnessLock(videoBrightnessKey, nextBrightness);
+    }
+
+    if (brightnessIndicatorTimeoutRef.current) {
+      clearTimeout(brightnessIndicatorTimeoutRef.current);
+      brightnessIndicatorTimeoutRef.current = null;
+    }
+
+    if (showIndicator) {
+      setShowBrightnessIndicator(true);
+      if (nextBrightness === 1) {
+        brightnessIndicatorTimeoutRef.current = setTimeout(() => {
+          setShowBrightnessIndicator(false);
+          brightnessIndicatorTimeoutRef.current = null;
+        }, 1500);
+      }
+    } else {
+      setShowBrightnessIndicator(false);
+    }
+  };
+
+  const toggleBrightnessLock = () => {
+    if (!videoBrightnessKey) return;
+
+    if (isBrightnessLockedRef.current) {
+      removeVideoBrightnessLock(videoBrightnessKey);
+      isBrightnessLockedRef.current = false;
+      setIsBrightnessLocked(false);
+    } else {
+      saveVideoBrightnessLock(videoBrightnessKey, brightnessRef.current);
+      isBrightnessLockedRef.current = true;
+      setIsBrightnessLocked(true);
+    }
+  };
+
+  useEffect(() => {
+    if (brightnessIndicatorTimeoutRef.current) {
+      clearTimeout(brightnessIndicatorTimeoutRef.current);
+      brightnessIndicatorTimeoutRef.current = null;
+    }
+
+    const locks = readVideoBrightnessLocks();
+    const savedBrightness = videoBrightnessKey ? locks[videoBrightnessKey] : undefined;
+    const hasSavedBrightness = typeof savedBrightness === 'number' && Number.isFinite(savedBrightness);
+    const nextBrightness = hasSavedBrightness ? normalizeBrightness(savedBrightness) : 1;
+
+    brightnessRef.current = nextBrightness;
+    isBrightnessLockedRef.current = hasSavedBrightness;
+    setBrightness(nextBrightness);
+    setIsBrightnessLocked(hasSavedBrightness);
+    setShowBrightnessIndicator(false);
+  }, [videoBrightnessKey]);
+
+  useEffect(() => () => {
+    if (brightnessIndicatorTimeoutRef.current) {
+      clearTimeout(brightnessIndicatorTimeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (brightnessMenuRef.current && !brightnessMenuRef.current.contains(e.target as Node)) {
+        setShowBrightnessMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const takeScreenshot = () => {
     if (!videoRef.current) return;
@@ -1928,6 +2077,16 @@ export default function App() {
 
   // Keyboard Shortcuts (VLC style)
   const handleKeyDown = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target?.isContentEditable ||
+      target?.tagName === 'INPUT' ||
+      target?.tagName === 'TEXTAREA' ||
+      target?.tagName === 'SELECT'
+    ) {
+      return;
+    }
+
     keysPressed.current[e.code] = true;
     setIsAltPressed(e.altKey);
     if (!videoRef.current) return;
@@ -2038,6 +2197,11 @@ export default function App() {
         }
         break;
       case 'ArrowUp':
+        if (e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          applyVideoBrightness(brightnessRef.current + 0.05, true);
+          break;
+        }
         if (e.altKey) {
           e.preventDefault();
           if (!e.repeat) applyVideoRotation(180);
@@ -2046,6 +2210,11 @@ export default function App() {
         updateVolume(volumeRef.current + 0.05, true);
         break;
       case 'ArrowDown':
+        if (e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          applyVideoBrightness(brightnessRef.current - 0.05, true);
+          break;
+        }
         if (e.altKey) {
           e.preventDefault();
           if (!e.repeat) applyVideoRotation(0);
@@ -2420,9 +2589,12 @@ export default function App() {
     cursorStyle = 'crosshair';
   }
 
-  let transformStyle: React.CSSProperties = {};
+  let transformStyle: React.CSSProperties = {
+    filter: 'brightness(' + brightness + ')'
+  };
   if (zoomState.scale > 1 || zoomState.tx !== 0 || zoomState.ty !== 0 || rotation !== 0) {
     transformStyle = {
+      ...transformStyle,
       transform: `translate(${zoomState.tx}%, ${zoomState.ty}%) scale(${zoomState.scale}) translate(50%, 50%) rotate(${rotation}deg) translate(-50%, -50%)`,
       transformOrigin: `0 0`,
       transition: (isSelecting || keysPressed.current['AltLeft'] || keysPressed.current['AltRight']) ? 'none' : 'transform 0.1s ease-out'
@@ -2928,6 +3100,32 @@ export default function App() {
                   <span className="text-xl font-bold">{Math.round(volume * 100)}%</span>
                 </div>
               )}
+
+              {(brightness !== 1 || showBrightnessIndicator) && (
+                <div
+                  className="bg-theme-bg/80 backdrop-blur-sm px-4 py-2 rounded-lg text-theme-text flex items-center gap-2 transition-opacity duration-300 shadow-sm border border-theme-border"
+                  role="status"
+                  aria-live="polite"
+                  aria-label={`${t.brightness}: ${Math.round(brightness * 100)}%${isBrightnessLocked ? `, ${t.brightnessLocked}` : ''}`}
+                >
+                  <SlidersHorizontal size={22} className="text-theme-accent" />
+                  <span className="text-xl font-bold">{Math.round(brightness * 100)}%</span>
+                  {videoBrightnessKey && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleBrightnessLock();
+                      }}
+                      className={`pointer-events-auto ml-1 p-1 rounded transition-colors ${isBrightnessLocked ? 'text-theme-accent bg-theme-accent/15' : 'text-theme-text-muted hover:text-theme-accent'}`}
+                      title={isBrightnessLocked ? t.unlockBrightness : t.lockBrightness}
+                      aria-label={isBrightnessLocked ? t.unlockBrightness : t.lockBrightness}
+                      aria-pressed={isBrightnessLocked}
+                    >
+                      {isBrightnessLocked ? <Lock size={21} /> : <Unlock size={21} />}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Zoom Scale Indicator */}
@@ -3106,10 +3304,90 @@ export default function App() {
             <button
               onClick={takeScreenshot}
               className={`transition-colors hover:text-theme-accent relative ${screenshotFlash ? 'text-theme-accent' : 'text-theme-text'}`}
-              title="Screenshot"
+              title={t.scScreenshot}
+              aria-label={t.scScreenshot}
             >
               <Camera size={20} />
             </button>
+
+            {/* Brightness control */}
+            <div className="relative flex items-center" ref={brightnessMenuRef}>
+              <button
+                onClick={() => setShowBrightnessMenu(prev => !prev)}
+                className={'flex items-center gap-1.5 min-w-[58px] transition-colors ' + (brightness !== 1 || isBrightnessLocked || showBrightnessMenu ? 'text-theme-accent' : 'text-theme-text hover:text-theme-accent')}
+                title={t.brightness + ': ' + Math.round(brightness * 100) + '%'}
+                aria-label={t.brightness + ': ' + Math.round(brightness * 100) + '%'}
+                aria-haspopup="dialog"
+                aria-expanded={showBrightnessMenu}
+              >
+                <SlidersHorizontal size={20} />
+                <span className="text-xs font-mono font-bold tabular-nums">{Math.round(brightness * 100)}%</span>
+                {isBrightnessLocked && <Lock size={11} aria-hidden="true" />}
+              </button>
+
+              {showBrightnessMenu && (
+                <div
+                  className="absolute bottom-10 right-0 w-64 bg-theme-bg border border-theme-border rounded-xl shadow-2xl z-50 overflow-hidden"
+                  role="dialog"
+                  aria-label={t.brightness}
+                >
+                  <div className="p-3 border-b border-theme-border flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-theme-text-muted">{t.brightness}</span>
+                    <span className="text-xs font-mono text-theme-accent font-bold" aria-live="polite">
+                      {Math.round(brightness * 100)}%
+                    </span>
+                  </div>
+                  <div className="px-4 py-4">
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="1.5"
+                      step="0.05"
+                      value={brightness}
+                      onChange={(e) => applyVideoBrightness(Number(e.target.value))}
+                      className="w-full h-1 accent-theme-accent cursor-pointer"
+                      aria-label={t.brightness}
+                      aria-valuemin={50}
+                      aria-valuemax={150}
+                      aria-valuenow={Math.round(brightness * 100)}
+                      aria-valuetext={Math.round(brightness * 100) + '%'}
+                    />
+                    <div className="flex justify-between mt-2 text-[10px] font-mono text-theme-text-muted" aria-hidden="true">
+                      <span>50%</span>
+                      <span>100%</span>
+                      <span>150%</span>
+                    </div>
+                    <button
+                      onClick={() => applyVideoBrightness(1)}
+                      disabled={brightness === 1}
+                      className="mt-4 w-full bg-theme-bg-tertiary hover:bg-theme-border disabled:opacity-40 disabled:cursor-default text-theme-text text-xs font-bold py-2 rounded-lg transition-colors"
+                    >
+                      {t.resetBrightness}
+                    </button>
+                    {videoBrightnessKey && (
+                      <button
+                        onClick={toggleBrightnessLock}
+                        className={`mt-2 w-full flex items-center justify-center gap-2 border text-xs font-bold py-2 rounded-lg transition-colors ${isBrightnessLocked ? 'border-theme-accent/50 bg-theme-accent/15 text-theme-accent hover:bg-theme-accent/25' : 'border-theme-border bg-theme-bg-tertiary text-theme-text hover:border-theme-accent hover:text-theme-accent'}`}
+                        title={isBrightnessLocked ? t.unlockBrightness : t.lockBrightness}
+                        aria-label={isBrightnessLocked ? t.unlockBrightness : t.lockBrightness}
+                        aria-pressed={isBrightnessLocked}
+                      >
+                        {isBrightnessLocked ? <Lock size={15} /> : <Unlock size={15} />}
+                        <span>{isBrightnessLocked ? t.unlockBrightness : t.lockBrightness}</span>
+                      </button>
+                    )}
+                    {videoBrightnessKey && (
+                      <p
+                        className={`mt-2 text-center text-[10px] font-medium ${isBrightnessLocked ? 'text-theme-accent' : 'text-theme-text-muted'}`}
+                        aria-live="polite"
+                      >
+                        {isBrightnessLocked ? t.brightnessLocked : t.brightnessUnlocked}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Audio repair is now automatic, button removed */}
 
@@ -4041,6 +4319,8 @@ export default function App() {
                   { keys: ['Alt', '+', '↑'], desc: t.scRotate180 },
                   { keys: ['Alt', '+', '↓'], desc: t.scRotate0 },
                   { keys: ['Alt', '+', 'S'], desc: t.scScreenshot },
+                  { keys: ['Ctrl', '+', '↑'], desc: t.scBrightnessUp },
+                  { keys: ['Ctrl', '+', '↓'], desc: t.scBrightnessDown },
                 ].map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between p-3 hover:bg-theme-bg-tertiary rounded-lg transition-colors">
                     <div className="flex items-center gap-1.5">
