@@ -10,6 +10,8 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import { exec } from 'child_process';
 
+process.env.UV_THREADPOOL_SIZE = '64';
+
 let ffmpegExePath = ffmpegPath;
 if (app.isPackaged) {
   ffmpegExePath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
@@ -278,24 +280,67 @@ function startStreamServer() {
         if (range) {
           const parts = range.replace(/bytes=/, "").split("-");
           const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+          if (isNaN(start) || start >= fileSize) {
+            res.writeHead(416, {
+              'Content-Range': `bytes */${fileSize}`,
+              'Access-Control-Allow-Origin': '*'
+            });
+            return res.end();
+          }
+
+          // Larger chunk for 4K/long files - less round-trips when seeking, still streamable
+          const CHUNK_SIZE = 32 * 1024 * 1024;
+          // Browser may request precise end; respect it, otherwise cap at 32MB to avoid sending entire 20GB file at once
+          let end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
+          // Clamp end to fileSize-1 and ensure end >= start
+          end = Math.min(end, fileSize - 1);
+          if (end < start) end = start;
           const chunksize = (end - start) + 1;
-          const file = fs.createReadStream(videoPath, { start, end });
+          const file = fs.createReadStream(videoPath, { start, end, highWaterMark: 512 * 1024 });
+          // Detect mime from extension for better seeking compatibility
+          const mimeMap = { '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4' };
+          const mimeType = mimeMap[path.extname(videoPath).toLowerCase()] || 'video/mp4';
           const head = {
             'Content-Range': `bytes ${start}-${end}/${fileSize}`,
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize,
-            'Content-Type': 'video/mp4',
+            'Content-Type': mimeType,
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Range'
           };
           res.writeHead(206, head);
+
+          res.on('close', () => {
+            file.destroy();
+          });
+          file.on('error', () => {
+            try { file.destroy(); } catch {}
+            if (!res.headersSent) res.end();
+          });
+
           file.pipe(res);
         } else {
+          const mimeMap2 = { '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4' };
+          const mimeType2 = mimeMap2[path.extname(videoPath).toLowerCase()] || 'video/mp4';
           const head = {
             'Content-Length': fileSize,
-            'Content-Type': 'video/mp4',
+            'Content-Type': mimeType2,
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'no-cache',
+            'Access-Control-Allow-Origin': '*'
           };
           res.writeHead(200, head);
-          fs.createReadStream(videoPath).pipe(res);
+          const file = fs.createReadStream(videoPath, { highWaterMark: 512 * 1024 });
+          res.on('close', () => {
+            try { file.destroy(); } catch {}
+          });
+          file.on('error', () => {
+            try { file.destroy(); } catch {}
+            if (!res.headersSent) res.end();
+          });
+          file.pipe(res);
         }
       }
     });

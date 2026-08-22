@@ -26,6 +26,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## Key Features
 
+* **Silky-Smooth Seeking (New in v1.1.64)**: Lag-free scrubbing on large/long files with debounced timeline, `fastSeek` to nearest keyframe, 32 MB chunk streaming and non-blocking UI — hold `Arrow Left/Right` for continuous seek.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
@@ -34,7 +35,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 * **Video Brightness Control**: Adjust the active video from 50% to 150% brightness without modifying the original media file.
 * **Per-Video Brightness Lock**: Lock a brightness level for a specific video and automatically restore it the next time that video is opened.
 * **Brightness Shortcuts**: Press `Ctrl + Arrow Up` or `Ctrl + Arrow Down` to adjust brightness in 5% steps with an on-video percentage indicator.
-* **Dynamic Playback Control**: Play, pause, seek, adjust volume, and use press-and-hold slow motion.
+* **Precision Playback Control**: Play, pause, `5s` / `15s` (`Shift`) / `20s` (`Ctrl`) seek with hold-to-seek, adjustable volume and press-and-hold slow motion (0.25x).
 * **Smart Playlist**: Drag-and-drop support with optional automatic removal of finished videos.
 * **IPTV Support**: Xtream Codes, M3U, and EPG support built in.
 * **Subtitle Engine**: Support for `.srt`, `.vtt`, `.ass`, and additional subtitle formats with synchronization offset.
@@ -122,6 +123,17 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ---
 
 ---
+
+## Release Notes v1.1.64
+
+Doggy Player v1.1.64 delivers buttery-smooth seeking for large/long videos and pro-grade hold-to-seek controls:
+
+* **Fixed lag on large files:** Timeline scrubbing is now debounced (`75ms`), uses `fastSeek` to the nearest keyframe and a subtle spinner instead of black flash — no more freeze on 4K/long `.mp4`/`.mkv`.
+* **Faster local streaming:** Electron stream server now serves `32 MB` chunks with `512 KB` `highWaterMark`, proper `Content-Range` handling and MIME detection for instant seeks.
+* **New seek steps:** Single tap `Arrow Left/Right` is now `5s` (was `10s`), `Shift` + arrow = `15s`, `Ctrl` + arrow = `20s`.
+* **Hold to seek:** Hold `Arrow Left/Right` (or `Ctrl`/`Shift` + arrow) to continuously seek until you release — perfect for long videos.
+* **Smarter UI:** Seeking state is tracked separately from buffering, so `onTimeUpdate` stays smooth and the timeline stays responsive while the video decodes.
+* **Automatic update:** Installed apps on **Windows, macOS and Linux** receive v1.1.64 automatically via the built-in updater (`latest.yml` / `latest-mac.yml` / `latest-linux.yml`).
 
 ## Release Notes v1.1.63
 

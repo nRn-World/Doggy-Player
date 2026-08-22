@@ -28,8 +28,12 @@ const translations = {
     scMute: "Mute",
     scVolUp: "Volume up",
     scVolDown: "Volume down",
-    scForward: "Forward 10s",
-    scBackward: "Backward 10s",
+    scForward: "Forward 5s (hold for continuous)",
+    scBackward: "Backward 5s (hold for continuous)",
+    scForwardCtrl: "Ctrl + Forward 20s (hold)",
+    scBackwardCtrl: "Ctrl + Backward 20s (hold)",
+    scForwardShift: "Shift + Forward 15s (hold)",
+    scBackwardShift: "Shift + Backward 15s (hold)",
     scFastForward: "Fast forward (1.5x)",
     scFastForward2x: "Fast forward (2.0x) - double tap",
     scZoomIn: "Zoom in",
@@ -154,8 +158,12 @@ const translations = {
     scMute: "Tyst",
     scVolUp: "Höj volym",
     scVolDown: "Sänk volym",
-    scForward: "Framåt 10s",
-    scBackward: "Bakåt 10s",
+    scForward: "Framåt 5s (håll för kontinuerlig)",
+    scBackward: "Bakåt 5s (håll för kontinuerlig)",
+    scForwardCtrl: "Ctrl + Framåt 20s (håll)",
+    scBackwardCtrl: "Ctrl + Bakåt 20s (håll)",
+    scForwardShift: "Shift + Framåt 15s (håll)",
+    scBackwardShift: "Shift + Bakåt 15s (håll)",
     scFastForward: "Snabbspola (1.5x)",
     scFastForward2x: "Snabbspola (2.0x) - dubbelklick",
     scZoomIn: "Zooma in",
@@ -280,8 +288,12 @@ const translations = {
     scMute: "Sessiz",
     scVolUp: "Sesi Aç",
     scVolDown: "Sesi Kıs",
-    scForward: "10 saniye ileri",
-    scBackward: "10 saniye geri",
+    scForward: "5 saniye ileri (basılı tut = sürekli)",
+    scBackward: "5 saniye geri (basılı tut = sürekli)",
+    scForwardCtrl: "Ctrl + 20 saniye ileri (basılı tut)",
+    scBackwardCtrl: "Ctrl + 20 saniye geri (basılı tut)",
+    scForwardShift: "Shift + 15 saniye ileri (basılı tut)",
+    scBackwardShift: "Shift + 15 saniye geri (basılı tut)",
     scFastForward: "Hızlı ileri sar (1.5x)",
     scFastForward2x: "Hızlı ileri sar (2.0x) - çift tıklama",
     scZoomIn: "Yakınlaştır",
@@ -2075,6 +2087,136 @@ export default function App() {
   const isSlowMoActive = useRef(false);
   const preSlowMoState = useRef({ wasPlaying: false, rate: 1.0 });
 
+  const pendingSeekDeltaRef = useRef(0);
+  const pendingSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timelineSeekRef = useRef<number | null>(null);
+  const timelineSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSeekingRef = useRef(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const wasPlayingBeforeSeekRef = useRef(false);
+  const holdSeekIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdSeekDeltaRef = useRef<number>(0);
+
+  const flushPendingSeek = () => {
+    if (pendingSeekTimerRef.current) {
+      clearTimeout(pendingSeekTimerRef.current);
+      pendingSeekTimerRef.current = null;
+    }
+    const delta = pendingSeekDeltaRef.current;
+    pendingSeekDeltaRef.current = 0;
+    if (!videoRef.current || delta === 0) return;
+    const dur = videoRef.current.duration || Infinity;
+    const target = Math.max(0, Math.min(dur, videoRef.current.currentTime + delta));
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+    wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
+    try {
+      const v: any = videoRef.current;
+      if (typeof v.fastSeek === 'function') v.fastSeek(target);
+      else v.currentTime = target;
+    } catch { videoRef.current.currentTime = target; }
+  };
+
+  const scheduleSeekDelta = (delta: number) => {
+    if (!videoRef.current) return;
+    pendingSeekDeltaRef.current += delta;
+    const dur = videoRef.current.duration || Infinity;
+    const base = videoRef.current.currentTime;
+    const target = Math.max(0, Math.min(dur, base + pendingSeekDeltaRef.current));
+    setCurrentTime(target);
+    if (pendingSeekTimerRef.current) clearTimeout(pendingSeekTimerRef.current);
+    pendingSeekTimerRef.current = setTimeout(flushPendingSeek, 60);
+  };
+
+  const performImmediateSeek = (delta: number) => {
+    if (!videoRef.current) return;
+    const isTranscoded = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
+    if (isTranscoded) {
+      seekTranscoded(streamSeekOffsetRef.current + (videoRef.current.currentTime || 0) + delta);
+    } else {
+      const dur = videoRef.current.duration || Infinity;
+      const target = Math.max(0, Math.min(dur, videoRef.current.currentTime + delta));
+      setCurrentTime(target);
+      isSeekingRef.current = true;
+      setIsSeeking(true);
+      wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
+      try {
+        const v: any = videoRef.current;
+        if (typeof v.fastSeek === 'function') v.fastSeek(target);
+        else v.currentTime = target;
+      } catch { videoRef.current.currentTime = target; }
+    }
+  };
+
+  const startHoldSeek = (delta: number) => {
+    if (holdSeekIntervalRef.current) return;
+    holdSeekDeltaRef.current = delta;
+    performImmediateSeek(delta);
+    holdSeekIntervalRef.current = setInterval(() => {
+      performImmediateSeek(holdSeekDeltaRef.current);
+    }, 180);
+  };
+
+  const stopHoldSeek = () => {
+    if (holdSeekIntervalRef.current) {
+      clearInterval(holdSeekIntervalRef.current);
+      holdSeekIntervalRef.current = null;
+    }
+    holdSeekDeltaRef.current = 0;
+    if (pendingSeekTimerRef.current) {
+      clearTimeout(pendingSeekTimerRef.current);
+      flushPendingSeek();
+    }
+  };
+
+  const flushTimelineSeek = () => {
+    if (timelineSeekTimerRef.current) {
+      clearTimeout(timelineSeekTimerRef.current);
+      timelineSeekTimerRef.current = null;
+    }
+    if (timelineSeekRef.current === null || !videoRef.current) return;
+    const t = timelineSeekRef.current;
+    timelineSeekRef.current = null;
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+    wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
+    try {
+      const v: any = videoRef.current;
+      if (typeof v.fastSeek === 'function') v.fastSeek(t);
+      else v.currentTime = t;
+    } catch { videoRef.current.currentTime = t; }
+  };
+
+  const scheduleTimelineSeek = (t: number, opts?: { immediate?: boolean }) => {
+    setCurrentTime(t);
+    timelineSeekRef.current = t;
+    if (timelineSeekTimerRef.current) clearTimeout(timelineSeekTimerRef.current);
+    if (opts?.immediate) {
+      flushTimelineSeek();
+    } else {
+      timelineSeekTimerRef.current = setTimeout(flushTimelineSeek, 75);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pendingSeekTimerRef.current) clearTimeout(pendingSeekTimerRef.current);
+      if (timelineSeekTimerRef.current) clearTimeout(timelineSeekTimerRef.current);
+      if (holdSeekIntervalRef.current) clearInterval(holdSeekIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    isSeekingRef.current = false;
+    setIsSeeking(false);
+    timelineSeekRef.current = null;
+    if (timelineSeekTimerRef.current) { clearTimeout(timelineSeekTimerRef.current); timelineSeekTimerRef.current = null; }
+    pendingSeekDeltaRef.current = 0;
+    if (pendingSeekTimerRef.current) { clearTimeout(pendingSeekTimerRef.current); pendingSeekTimerRef.current = null; }
+    if (holdSeekIntervalRef.current) { clearInterval(holdSeekIntervalRef.current); holdSeekIntervalRef.current = null; }
+    holdSeekDeltaRef.current = 0;
+  }, [videoSrc]);
+
   // Keyboard Shortcuts (VLC style)
   const handleKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
@@ -2170,11 +2312,9 @@ export default function App() {
         if (e.altKey) {
           if (!e.repeat) applyVideoRotation(rotationRef.current + 90);
         } else {
-          const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
-          if (isTranscodedStream) {
-            seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) + 10);
-          } else {
-            videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+          if (!e.repeat) {
+            const delta = e.ctrlKey ? 20 : e.shiftKey ? 15 : 5;
+            startHoldSeek(delta);
           }
         }
         break;
@@ -2189,11 +2329,9 @@ export default function App() {
           if (!e.repeat) applyVideoRotation(rotationRef.current - 90);
           break;
         }
-        const isTranscodedStream = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
-        if (isTranscodedStream) {
-          seekTranscoded(streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0) - 10);
-        } else {
-          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+        if (!e.repeat) {
+          const delta = e.ctrlKey ? -20 : e.shiftKey ? -15 : -5;
+          startHoldSeek(delta);
         }
         break;
       case 'ArrowUp':
@@ -2271,6 +2409,15 @@ export default function App() {
   const handleKeyUp = (e: KeyboardEvent) => {
     keysPressed.current[e.code] = false;
     setIsAltPressed(e.altKey);
+    if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+      stopHoldSeek();
+      // also flush any pending tap seek that hasn't been flushed yet
+      if (pendingSeekTimerRef.current) {
+        clearTimeout(pendingSeekTimerRef.current);
+        flushPendingSeek();
+      }
+      return;
+    }
     if (!videoRef.current) return;
 
     if (e.code === 'Space' || e.code === 'KeyK') {
@@ -2296,6 +2443,7 @@ export default function App() {
   const handleBlur = () => {
     keysPressed.current = {};
     setIsAltPressed(false);
+    stopHoldSeek();
   };
 
   const handleKeyDownRef = useRef<typeof handleKeyDown>(handleKeyDown);
@@ -2507,12 +2655,16 @@ export default function App() {
 
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    
     if (realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true')) {
       seekTranscoded(time);
     } else {
-      setCurrentTime(time);
-      if (videoRef.current) videoRef.current.currentTime = time;
+      scheduleTimelineSeek(time);
+    }
+  };
+
+  const handleTimelineCommit = () => {
+    if (timelineSeekRef.current !== null) {
+      flushTimelineSeek();
     }
   };
 
@@ -2803,16 +2955,41 @@ export default function App() {
               ref={videoRef}
               src={isHlsStream(videoSrc) ? undefined : (realVideoUrl || undefined)}
               muted={isMuted}
+              preload="auto"
+              playsInline
               className={`w-full h-full object-contain transition-opacity duration-300 ${isVideoLoading && sidebarMode === 'iptv' ? 'opacity-0' : 'opacity-100'}`}
               style={transformStyle}
               onCanPlay={() => {
                 setIsVideoLoading(false);
                 if (isPlaying) videoRef.current?.play().catch(() => {});
               }}
-              onPlaying={() => setIsVideoLoading(false)}
-              onWaiting={() => setIsVideoLoading(true)}
+              onPlaying={() => { setIsVideoLoading(false); setIsSeeking(false); isSeekingRef.current = false; }}
+              onWaiting={() => {
+                const isTranscoded = realVideoUrl?.includes('&transcode=true');
+                // For large local files (non-transcoded), show subtle seeking state instead of full IPTV overlay
+                if (!isHlsStream(videoSrc || '') && !isTranscoded && duration > 0) {
+                  // keep video visible during seek, just mark seeking
+                  isSeekingRef.current = true;
+                  setIsSeeking(true);
+                } else {
+                  setIsVideoLoading(true);
+                }
+              }}
               onLoadStart={() => setIsVideoLoading(true)}
+              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); }}
+              onSeeked={() => {
+                isSeekingRef.current = false;
+                setIsSeeking(false);
+                // Ensure currentTime state is synced after seek
+                const raw = videoRef.current?.currentTime || 0;
+                setCurrentTime(streamSeekOffsetRef.current + raw);
+                // If we paused before seek to avoid freeze, resume now
+                if (wasPlayingBeforeSeekRef.current && videoRef.current?.paused && isPlaying) {
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
               onTimeUpdate={() => {
+                if (isSeekingRef.current) return;
                 const rawTime = videoRef.current?.currentTime || 0;
                 setCurrentTime(streamSeekOffsetRef.current + rawTime);
               }}
@@ -2921,7 +3098,16 @@ export default function App() {
                 }
               }}
             />
-            
+
+            {/* Smooth seeking indicator for large files - prevents black flash */}
+            {isSeeking && !isHlsStream(videoSrc || '') && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+                <div className="bg-black/50 backdrop-blur-sm rounded-full p-3">
+                  <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                </div>
+              </div>
+            )}
+
             {/* Subtitle overlay */}
             {currentCue && (
               <div className="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none z-40 px-4">
@@ -3191,6 +3377,10 @@ export default function App() {
             max={duration || 100} 
             value={currentTime} 
             onChange={handleTimeChange}
+            onMouseUp={handleTimelineCommit}
+            onTouchEnd={handleTimelineCommit}
+            onPointerUp={handleTimelineCommit}
+            onKeyUp={handleTimelineCommit}
             onMouseMove={handleTimelineMouseMove}
             onMouseLeave={handleTimelineMouseLeave}
             className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-theme-primary hover:h-2 transition-all"
@@ -3206,10 +3396,10 @@ export default function App() {
             <button onClick={stopVideo} className="hover:text-theme-accent transition-colors">
               <Square size={16} className="fill-current" />
             </button>
-            <button onClick={() => { if(videoRef.current) videoRef.current.currentTime -= 10; }} className="hover:text-theme-accent transition-colors">
+            <button onClick={() => { if(videoRef.current) { scheduleSeekDelta(-5); flushPendingSeek(); } }} className="hover:text-theme-accent transition-colors">
               <SkipBack size={20} />
             </button>
-            <button onClick={() => { if(videoRef.current) videoRef.current.currentTime += 10; }} className="hover:text-theme-accent transition-colors">
+            <button onClick={() => { if(videoRef.current) { scheduleSeekDelta(5); flushPendingSeek(); } }} className="hover:text-theme-accent transition-colors">
               <SkipForward size={20} />
             </button>
             
@@ -4311,6 +4501,10 @@ export default function App() {
                   { keys: ['↓'], desc: t.scVolDown },
                   { keys: ['←'], desc: t.scBackward },
                   { keys: ['→'], desc: t.scForward },
+                  { keys: ['Ctrl', '+', '←'], desc: (t as any).scBackwardCtrl || 'Ctrl + Backward 20s' },
+                  { keys: ['Ctrl', '+', '→'], desc: (t as any).scForwardCtrl || 'Ctrl + Forward 20s' },
+                  { keys: ['Shift', '+', '←'], desc: (t as any).scBackwardShift || 'Shift + Backward 15s' },
+                  { keys: ['Shift', '+', '→'], desc: (t as any).scForwardShift || 'Shift + Forward 15s' },
                   { keys: ['+', '/', '='], desc: t.scZoomIn },
                   { keys: ['-'], desc: t.scZoomOut },
                   { keys: ['Ctrl', '+', 'Z'], desc: t.scResetZoom },
