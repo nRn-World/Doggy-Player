@@ -145,3 +145,5 @@ Doggy Player v1.1.63 adds flexible video brightness controls with per-video pers
 * **Per-video lock:** Lock a brightness value for one video and automatically restore it whenever that video is opened again.
 * **Non-destructive processing:** Brightness affects playback only and never modifies the original video file.
 * **Automatic update:** Existing installations receive v1.1.63 through Doggy Player's built-in updater after the release assets are published.
+
+Created by ❤️ © nRn World
