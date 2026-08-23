@@ -118,7 +118,7 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ## 🤝 Community & Support
 *   ⭐ **Star this project** if you find it useful!
 *   🐛 **Report bugs** via [GitHub Issues](https://github.com/nRn-World/Doggy-Player/issues).
-*   ☕ **Support development**: [Buy me a coffee](https://buymeacoffee.com/nrnworld)
+*   ☕ **Support development**: [Support on Ko-fi](https://ko-fi.com/nrnworld)
 
 ---
 
