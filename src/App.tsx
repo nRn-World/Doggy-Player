@@ -2096,6 +2096,117 @@ export default function App() {
   const wasPlayingBeforeSeekRef = useRef(false);
   const holdSeekIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const holdSeekDeltaRef = useRef<number>(0);
+  /** Absolute timeline target while user holds ←/→ — UI updates every tick, media seek is coalesced */
+  const holdSeekTargetRef = useRef<number | null>(null);
+  /** Last-wins target if user seeks again before previous seek finishes */
+  const queuedSeekTargetRef = useRef<number | null>(null);
+  const seekInFlightRef = useRef(false);
+  const isScrubbingRef = useRef(false);
+  const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewTimeRef = useRef(0);
+
+  const isTranscodedStream = () =>
+    !!(realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true'));
+
+  const clampSeekTime = (t: number) => {
+    const dur = streamDurationRef.current || videoRef.current?.duration || Infinity;
+    return Math.max(0, Math.min(Number.isFinite(dur) ? dur : Infinity, t));
+  };
+
+  // Seek helper for transcoded streams (debounced — each seek restarts FFmpeg)
+  const seekTranscoded = (newTime: number) => {
+    const clampedTime = clampSeekTime(newTime);
+    streamSeekOffsetRef.current = clampedTime;
+    setCurrentTime(clampedTime);
+    wasPlayingBeforeSeekRef.current = wasPlayingBeforeSeekRef.current || !!(videoRef.current && !videoRef.current.paused);
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+    if (videoRef.current && !videoRef.current.paused) {
+      try { videoRef.current.pause(); } catch { /* ignore */ }
+    }
+    if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
+    transcodeSeekTimerRef.current = setTimeout(() => {
+      transcodeSeekTimerRef.current = null;
+      if (realVideoUrl) {
+        const baseUrl = realVideoUrl.split('&start=')[0];
+        setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
+      }
+    }, 280);
+  };
+
+  /** Single entry for media seeks: pause → seek → queue extras until seeked */
+  const applyMediaSeek = (rawTarget: number, opts?: { resumeAfter?: boolean }) => {
+    if (!videoRef.current) return;
+    const target = clampSeekTime(rawTarget);
+    setCurrentTime(target);
+
+    if (isTranscodedStream()) {
+      seekTranscoded(target);
+      return;
+    }
+
+    if (seekInFlightRef.current) {
+      queuedSeekTargetRef.current = target;
+      return;
+    }
+
+    const v = videoRef.current;
+    seekInFlightRef.current = true;
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+
+    if (opts?.resumeAfter !== false) {
+      wasPlayingBeforeSeekRef.current = !v.paused || wasPlayingBeforeSeekRef.current;
+    }
+
+    // Pausing frees the decoder so large/HQ files don't thrash while seeking
+    if (!v.paused) {
+      try { v.pause(); } catch { /* ignore */ }
+    }
+
+    try {
+      // currentTime = precise path; Chromium still keyframe-snaps when needed
+      v.currentTime = target;
+    } catch {
+      try {
+        const anyV: any = v;
+        if (typeof anyV.fastSeek === 'function') anyV.fastSeek(target);
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  const finishSeekCycle = () => {
+    if (queuedSeekTargetRef.current !== null) {
+      const next = queuedSeekTargetRef.current;
+      queuedSeekTargetRef.current = null;
+      seekInFlightRef.current = false;
+      const cur = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
+      if (Math.abs(next - cur) > 0.08) {
+        applyMediaSeek(next);
+        return;
+      }
+    }
+
+    seekInFlightRef.current = false;
+    isSeekingRef.current = false;
+    setIsSeeking(false);
+
+    const raw = videoRef.current?.currentTime || 0;
+    setCurrentTime(streamSeekOffsetRef.current + raw);
+
+    // Don't auto-resume while user is still scrubbing / holding arrows
+    if (
+      wasPlayingBeforeSeekRef.current &&
+      !isScrubbingRef.current &&
+      holdSeekIntervalRef.current === null &&
+      videoRef.current
+    ) {
+      videoRef.current.play().catch(() => {});
+    }
+  };
 
   const flushPendingSeek = () => {
     if (pendingSeekTimerRef.current) {
@@ -2105,56 +2216,42 @@ export default function App() {
     const delta = pendingSeekDeltaRef.current;
     pendingSeekDeltaRef.current = 0;
     if (!videoRef.current || delta === 0) return;
-    const dur = videoRef.current.duration || Infinity;
-    const target = Math.max(0, Math.min(dur, videoRef.current.currentTime + delta));
-    isSeekingRef.current = true;
-    setIsSeeking(true);
-    wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
-    try {
-      const v: any = videoRef.current;
-      if (typeof v.fastSeek === 'function') v.fastSeek(target);
-      else v.currentTime = target;
-    } catch { videoRef.current.currentTime = target; }
+    const base = holdSeekTargetRef.current ?? (streamSeekOffsetRef.current + videoRef.current.currentTime);
+    applyMediaSeek(base + delta);
   };
 
   const scheduleSeekDelta = (delta: number) => {
     if (!videoRef.current) return;
     pendingSeekDeltaRef.current += delta;
-    const dur = videoRef.current.duration || Infinity;
-    const base = videoRef.current.currentTime;
-    const target = Math.max(0, Math.min(dur, base + pendingSeekDeltaRef.current));
+    const base = streamSeekOffsetRef.current + videoRef.current.currentTime;
+    const target = clampSeekTime(base + pendingSeekDeltaRef.current);
     setCurrentTime(target);
     if (pendingSeekTimerRef.current) clearTimeout(pendingSeekTimerRef.current);
-    pendingSeekTimerRef.current = setTimeout(flushPendingSeek, 60);
-  };
-
-  const performImmediateSeek = (delta: number) => {
-    if (!videoRef.current) return;
-    const isTranscoded = realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true');
-    if (isTranscoded) {
-      seekTranscoded(streamSeekOffsetRef.current + (videoRef.current.currentTime || 0) + delta);
-    } else {
-      const dur = videoRef.current.duration || Infinity;
-      const target = Math.max(0, Math.min(dur, videoRef.current.currentTime + delta));
-      setCurrentTime(target);
-      isSeekingRef.current = true;
-      setIsSeeking(true);
-      wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
-      try {
-        const v: any = videoRef.current;
-        if (typeof v.fastSeek === 'function') v.fastSeek(target);
-        else v.currentTime = target;
-      } catch { videoRef.current.currentTime = target; }
-    }
+    pendingSeekTimerRef.current = setTimeout(flushPendingSeek, 80);
   };
 
   const startHoldSeek = (delta: number) => {
     if (holdSeekIntervalRef.current) return;
     holdSeekDeltaRef.current = delta;
-    performImmediateSeek(delta);
+    wasPlayingBeforeSeekRef.current = !!(videoRef.current && !videoRef.current.paused) || wasPlayingBeforeSeekRef.current;
+    const startBase = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
+    holdSeekTargetRef.current = clampSeekTime(startBase + delta);
+    setCurrentTime(holdSeekTargetRef.current);
+    applyMediaSeek(holdSeekTargetRef.current, { resumeAfter: false });
+
+    // UI advances every 120ms; media only seeks when previous seek finished (via queue) or every ~320ms
+    let ticks = 0;
     holdSeekIntervalRef.current = setInterval(() => {
-      performImmediateSeek(holdSeekDeltaRef.current);
-    }, 180);
+      if (holdSeekTargetRef.current === null) return;
+      holdSeekTargetRef.current = clampSeekTime(holdSeekTargetRef.current + holdSeekDeltaRef.current);
+      setCurrentTime(holdSeekTargetRef.current);
+      ticks += 1;
+      if (!seekInFlightRef.current || ticks % 3 === 0) {
+        applyMediaSeek(holdSeekTargetRef.current, { resumeAfter: false });
+      } else {
+        queuedSeekTargetRef.current = holdSeekTargetRef.current;
+      }
+    }, 120);
   };
 
   const stopHoldSeek = () => {
@@ -2163,6 +2260,10 @@ export default function App() {
       holdSeekIntervalRef.current = null;
     }
     holdSeekDeltaRef.current = 0;
+    if (holdSeekTargetRef.current !== null) {
+      applyMediaSeek(holdSeekTargetRef.current);
+      holdSeekTargetRef.current = null;
+    }
     if (pendingSeekTimerRef.current) {
       clearTimeout(pendingSeekTimerRef.current);
       flushPendingSeek();
@@ -2177,14 +2278,7 @@ export default function App() {
     if (timelineSeekRef.current === null || !videoRef.current) return;
     const t = timelineSeekRef.current;
     timelineSeekRef.current = null;
-    isSeekingRef.current = true;
-    setIsSeeking(true);
-    wasPlayingBeforeSeekRef.current = !videoRef.current.paused;
-    try {
-      const v: any = videoRef.current;
-      if (typeof v.fastSeek === 'function') v.fastSeek(t);
-      else v.currentTime = t;
-    } catch { videoRef.current.currentTime = t; }
+    applyMediaSeek(t, { resumeAfter: !isScrubbingRef.current });
   };
 
   const scheduleTimelineSeek = (t: number, opts?: { immediate?: boolean }) => {
@@ -2194,7 +2288,8 @@ export default function App() {
     if (opts?.immediate) {
       flushTimelineSeek();
     } else {
-      timelineSeekTimerRef.current = setTimeout(flushTimelineSeek, 75);
+      // Longer debounce while dragging large files — one seek, not dozens
+      timelineSeekTimerRef.current = setTimeout(flushTimelineSeek, isScrubbingRef.current ? 140 : 90);
     }
   };
 
@@ -2203,11 +2298,18 @@ export default function App() {
       if (pendingSeekTimerRef.current) clearTimeout(pendingSeekTimerRef.current);
       if (timelineSeekTimerRef.current) clearTimeout(timelineSeekTimerRef.current);
       if (holdSeekIntervalRef.current) clearInterval(holdSeekIntervalRef.current);
+      if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
+      if (previewSeekTimerRef.current) clearTimeout(previewSeekTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
     isSeekingRef.current = false;
+    seekInFlightRef.current = false;
+    queuedSeekTargetRef.current = null;
+    holdSeekTargetRef.current = null;
+    isScrubbingRef.current = false;
+    wasPlayingBeforeSeekRef.current = false;
     setIsSeeking(false);
     timelineSeekRef.current = null;
     if (timelineSeekTimerRef.current) { clearTimeout(timelineSeekTimerRef.current); timelineSeekTimerRef.current = null; }
@@ -2215,6 +2317,7 @@ export default function App() {
     if (pendingSeekTimerRef.current) { clearTimeout(pendingSeekTimerRef.current); pendingSeekTimerRef.current = null; }
     if (holdSeekIntervalRef.current) { clearInterval(holdSeekIntervalRef.current); holdSeekIntervalRef.current = null; }
     holdSeekDeltaRef.current = 0;
+    if (transcodeSeekTimerRef.current) { clearTimeout(transcodeSeekTimerRef.current); transcodeSeekTimerRef.current = null; }
   }, [videoSrc]);
 
   // Keyboard Shortcuts (VLC style)
@@ -2624,17 +2727,6 @@ export default function App() {
     }
   };
 
-  // Seek helper for transcoded streams
-  const seekTranscoded = (newTime: number) => {
-    const clampedTime = Math.max(0, Math.min(streamDurationRef.current || Infinity, newTime));
-    streamSeekOffsetRef.current = clampedTime;
-    setCurrentTime(clampedTime);
-    if (realVideoUrl) {
-      const baseUrl = realVideoUrl.split('&start=')[0];
-      setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
-    }
-  };
-
   const stopVideo = () => {
     if (videoRef.current) {
       videoRef.current.pause();
@@ -2653,9 +2745,18 @@ export default function App() {
     }
   };
 
+  const beginTimelineScrub = () => {
+    isScrubbingRef.current = true;
+    if (videoRef.current && !videoRef.current.paused) {
+      wasPlayingBeforeSeekRef.current = true;
+      try { videoRef.current.pause(); } catch { /* ignore */ }
+    }
+  };
+
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
-    if (realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true')) {
+    if (!isScrubbingRef.current) beginTimelineScrub();
+    if (isTranscodedStream()) {
       seekTranscoded(time);
     } else {
       scheduleTimelineSeek(time);
@@ -2663,8 +2764,16 @@ export default function App() {
   };
 
   const handleTimelineCommit = () => {
+    isScrubbingRef.current = false;
+    if (timelineSeekTimerRef.current) {
+      clearTimeout(timelineSeekTimerRef.current);
+      timelineSeekTimerRef.current = null;
+    }
     if (timelineSeekRef.current !== null) {
       flushTimelineSeek();
+    } else if (wasPlayingBeforeSeekRef.current && videoRef.current?.paused) {
+      // Scrub ended on already-applied position — resume
+      videoRef.current.play().catch(() => {});
     }
   };
 
@@ -2676,11 +2785,18 @@ export default function App() {
     const time = percentage * duration;
     
     setHoverTime(time);
-    setHoverPosition(x); // x is relative to the input element
-    
-    if (previewVideoRef.current) {
-      previewVideoRef.current.currentTime = time;
-    }
+    setHoverPosition(x);
+
+    // Throttle preview seeks so they don't contend with the main decoder on large files
+    if (!previewVideoRef.current) return;
+    previewTimeRef.current = time;
+    if (previewSeekTimerRef.current) return;
+    previewSeekTimerRef.current = setTimeout(() => {
+      previewSeekTimerRef.current = null;
+      try {
+        if (previewVideoRef.current) previewVideoRef.current.currentTime = previewTimeRef.current;
+      } catch { /* ignore */ }
+    }, 100);
   };
 
   const handleTimelineMouseLeave = () => {
@@ -2961,9 +3077,14 @@ export default function App() {
               style={transformStyle}
               onCanPlay={() => {
                 setIsVideoLoading(false);
-                if (isPlaying) videoRef.current?.play().catch(() => {});
+                setIsSeeking(false);
+                isSeekingRef.current = false;
+                seekInFlightRef.current = false;
+                if (isPlaying || wasPlayingBeforeSeekRef.current) {
+                  videoRef.current?.play().catch(() => {});
+                }
               }}
-              onPlaying={() => { setIsVideoLoading(false); setIsSeeking(false); isSeekingRef.current = false; }}
+              onPlaying={() => { setIsVideoLoading(false); setIsSeeking(false); isSeekingRef.current = false; seekInFlightRef.current = false; }}
               onWaiting={() => {
                 const isTranscoded = realVideoUrl?.includes('&transcode=true');
                 // For large local files (non-transcoded), show subtle seeking state instead of full IPTV overlay
@@ -2976,20 +3097,12 @@ export default function App() {
                 }
               }}
               onLoadStart={() => setIsVideoLoading(true)}
-              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); }}
+              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); seekInFlightRef.current = true; }}
               onSeeked={() => {
-                isSeekingRef.current = false;
-                setIsSeeking(false);
-                // Ensure currentTime state is synced after seek
-                const raw = videoRef.current?.currentTime || 0;
-                setCurrentTime(streamSeekOffsetRef.current + raw);
-                // If we paused before seek to avoid freeze, resume now
-                if (wasPlayingBeforeSeekRef.current && videoRef.current?.paused && isPlaying) {
-                  videoRef.current.play().catch(() => {});
-                }
+                finishSeekCycle();
               }}
               onTimeUpdate={() => {
-                if (isSeekingRef.current) return;
+                if (isSeekingRef.current || isScrubbingRef.current || holdSeekIntervalRef.current) return;
                 const rawTime = videoRef.current?.currentTime || 0;
                 setCurrentTime(streamSeekOffsetRef.current + rawTime);
               }}
@@ -3361,9 +3474,10 @@ export default function App() {
             >
               <video 
                 ref={previewVideoRef}
-                src={isHlsStream(videoSrc) ? undefined : (videoSrc || undefined)}
+                src={isHlsStream(videoSrc) ? undefined : (realVideoUrl || videoSrc || undefined)}
                 className="w-40 h-auto object-contain bg-black"
                 muted
+                preload="metadata"
                 playsInline
               />
               <div className="text-center text-xs text-theme-text font-mono py-1 bg-theme-bg-tertiary">
@@ -3377,6 +3491,9 @@ export default function App() {
             max={duration || 100} 
             value={currentTime} 
             onChange={handleTimeChange}
+            onPointerDown={beginTimelineScrub}
+            onMouseDown={beginTimelineScrub}
+            onTouchStart={beginTimelineScrub}
             onMouseUp={handleTimelineCommit}
             onTouchEnd={handleTimelineCommit}
             onPointerUp={handleTimelineCommit}

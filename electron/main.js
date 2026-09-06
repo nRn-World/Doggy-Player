@@ -3,7 +3,7 @@ import os from 'os';
 import pkg from 'electron-updater';
 const { autoUpdater } = pkg;
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import express from 'express';
 import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
@@ -11,6 +11,9 @@ import ffmpegPath from 'ffmpeg-static';
 import { exec } from 'child_process';
 
 process.env.UV_THREADPOOL_SIZE = '64';
+
+/** Active FFmpeg pipe per response — kill previous on new seek to avoid decoder pile-up */
+let activeTranscodeCommand = null;
 
 let ffmpegExePath = ffmpegPath;
 if (app.isPackaged) {
@@ -26,6 +29,9 @@ let streamServer = null;
 let streamPort = 3001;
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Prefer hardware decode / larger media cache when available — helps seek on big files
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport');
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
 
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -247,20 +253,29 @@ function startStreamServer() {
 
       if (transcode || needsFullTranscode) {
         console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL' : 'AUDIO'} from ${start}s: ${videoPath}`);
+
+        // Kill previous transcode so rapid seeks don't stack FFmpeg processes
+        if (activeTranscodeCommand) {
+          try { activeTranscodeCommand.kill('SIGKILL'); } catch (_) {}
+          activeTranscodeCommand = null;
+        }
+
         res.writeHead(200, {
           'Content-Type': 'video/mp4',
-          'Transfer-Encoding': 'chunked'
+          'Transfer-Encoding': 'chunked',
+          'Cache-Control': 'no-store'
         });
 
         const command = ffmpeg(videoPath);
-        
+        activeTranscodeCommand = command;
+
         if (start > 0) {
           command.seekInput(start);
         }
 
         if (needsFullTranscode) {
           command.videoCodec('libx264')
-                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p']);
+                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p', '-g 48', '-keyint_min 48']);
         } else {
           command.videoCodec('copy');
         }
@@ -269,13 +284,18 @@ function startStreamServer() {
           .format('matroska')
           .on('start', (cmd) => console.log('[FFmpeg] Command:', cmd))
           .on('error', (err) => {
-            console.error('[Stream Error]', err.message);
+            if (!String(err.message || '').includes('SIGKILL')) {
+              console.error('[Stream Error]', err.message);
+            }
           })
           .pipe(res, { end: true });
 
-        res.on('close', () => {
-          try { command.kill(); } catch (e) {}
-        });
+        const cleanup = () => {
+          if (activeTranscodeCommand === command) activeTranscodeCommand = null;
+          try { command.kill('SIGKILL'); } catch (_) {}
+        };
+        res.on('close', cleanup);
+        res.on('error', cleanup);
       } else {
         if (range) {
           const parts = range.replace(/bytes=/, "").split("-");
@@ -289,16 +309,13 @@ function startStreamServer() {
             return res.end();
           }
 
-          // Larger chunk for 4K/long files - less round-trips when seeking, still streamable
-          const CHUNK_SIZE = 32 * 1024 * 1024;
-          // Browser may request precise end; respect it, otherwise cap at 32MB to avoid sending entire 20GB file at once
+          // Larger initial window + bigger read buffer → fewer stalls on 4K/long seeks
+          const CHUNK_SIZE = 64 * 1024 * 1024;
           let end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + CHUNK_SIZE - 1, fileSize - 1);
-          // Clamp end to fileSize-1 and ensure end >= start
           end = Math.min(end, fileSize - 1);
           if (end < start) end = start;
           const chunksize = (end - start) + 1;
-          const file = fs.createReadStream(videoPath, { start, end, highWaterMark: 512 * 1024 });
-          // Detect mime from extension for better seeking compatibility
+          const file = fs.createReadStream(videoPath, { start, end, highWaterMark: 2 * 1024 * 1024 });
           const mimeMap = { '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.mov': 'video/quicktime', '.webm': 'video/webm', '.m4v': 'video/mp4' };
           const mimeType = mimeMap[path.extname(videoPath).toLowerCase()] || 'video/mp4';
           const head = {
@@ -306,7 +323,7 @@ function startStreamServer() {
             'Accept-Ranges': 'bytes',
             'Content-Length': chunksize,
             'Content-Type': mimeType,
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'private, max-age=3600',
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Headers': 'Range'
           };
@@ -328,11 +345,11 @@ function startStreamServer() {
             'Content-Length': fileSize,
             'Content-Type': mimeType2,
             'Accept-Ranges': 'bytes',
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'private, max-age=3600',
             'Access-Control-Allow-Origin': '*'
           };
           res.writeHead(200, head);
-          const file = fs.createReadStream(videoPath, { highWaterMark: 512 * 1024 });
+          const file = fs.createReadStream(videoPath, { highWaterMark: 2 * 1024 * 1024 });
           res.on('close', () => {
             try { file.destroy(); } catch {}
           });
@@ -374,9 +391,16 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
   const willTranscode = transcode || needsFullTranscode;
 
   const duration = await getVideoDuration(cleanPath);
-  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}${willTranscode ? '&transcode=true' : ''}`;
-  
-  return { url, duration, isTranscoded: willTranscode };
+
+  // Direct file:// for seekable formats — Chromium reads disk natively (far smoother than HTTP Range).
+  // Keep local HTTP+FFmpeg only when remux/transcode is required.
+  if (!willTranscode) {
+    const url = pathToFileURL(cleanPath).href;
+    return { url, duration, isTranscoded: false };
+  }
+
+  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}&transcode=true`;
+  return { url, duration, isTranscoded: true };
 });
 
 app.on('window-all-closed', () => {

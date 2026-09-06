@@ -26,7 +26,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## Key Features
 
-* **Silky-Smooth Seeking (New in v1.1.64)**: Lag-free scrubbing on large/long files with debounced timeline, `fastSeek` to nearest keyframe, 32 MB chunk streaming and non-blocking UI — hold `Arrow Left/Right` for continuous seek.
+* **Freeze-Free Seeking (New in v1.1.65)**: Large/HQ files seek without freezing — direct `file://` playback, pause-before-seek, coalesced scrub queue and smarter hold-to-seek.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
@@ -123,6 +123,17 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ---
 
 ---
+
+## Release Notes v1.1.65
+
+Doggy Player v1.1.65 fixes freeze-on-seek for large and high-quality videos:
+
+* **No more freeze when seeking:** Playback pauses briefly during seek, then resumes so the decoder is not overloaded on big/HQ files.
+* **Direct disk playback:** Common local formats (mp4, mkv, mov, webm, …) use `file://` instead of HTTP Range for much faster seeks.
+* **Smarter seek queue:** Rapid scrubbing and hold-to-seek coalesce into one in-flight seek (last-wins) instead of stacking decode jobs.
+* **Smoother timeline & arrows:** UI time updates immediately; media seeks less often while you drag or hold ←/→.
+* **Transcoded formats:** Debounced FFmpeg restarts for avi/ts and similar so seeks no longer pile up.
+* **Automatic update:** Installed apps on **Windows, macOS and Linux** receive v1.1.65 automatically via the built-in updater (`latest.yml` / `latest-mac.yml` / `latest-linux.yml`).
 
 ## Release Notes v1.1.64
 
