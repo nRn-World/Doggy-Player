@@ -9,6 +9,7 @@ import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
 import { exec, spawn } from 'child_process';
+import crypto from 'crypto';
 
 process.env.UV_THREADPOOL_SIZE = '64';
 
@@ -31,6 +32,11 @@ let mainWindow = null;
 let streamServer = null;
 let streamPort = 3001;
 
+/** Containers Chromium cannot seek well (even if file extension says .mp4) */
+const UNSEEKABLE_FORMATS = new Set([
+  'mpegts', 'mpeg', 'avi', 'flv', 'asf', 'rm', 'rmvb', 'swf', 'vob'
+]);
+
 function resolveLocalMediaPath(filePath) {
   if (!filePath || typeof filePath !== 'string') return '';
   let cleanPath = filePath;
@@ -41,6 +47,96 @@ function resolveLocalMediaPath(filePath) {
     cleanPath = cleanPath.replace(/\//g, '\\');
   }
   return cleanPath;
+}
+
+/** Parse `Input #0, mpegts, from ...` from ffmpeg stderr */
+function probeInputFormat(videoPath) {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegExePath, ['-hide_banner', '-i', videoPath], { windowsHide: true });
+    let err = '';
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch (_) {}
+      resolve('');
+    }, 8000);
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve('');
+    });
+    proc.on('close', () => {
+      clearTimeout(timer);
+      const m = err.match(/Input #0,\s*([^,\s]+)/i);
+      resolve(m ? m[1].toLowerCase() : '');
+    });
+  });
+}
+
+function remuxCachePath(cleanPath) {
+  let stat;
+  try { stat = fs.statSync(cleanPath); } catch { return null; }
+  const key = `${cleanPath}|${stat.size}|${stat.mtimeMs}`;
+  const hash = crypto.createHash('sha1').update(key).digest('hex').slice(0, 24);
+  const dir = path.join(app.getPath('userData'), 'remux-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${hash}.mp4`);
+}
+
+/**
+ * Remux unseekable containers (e.g. MPEG-TS saved as .mp4) to real MP4 + faststart.
+ * Stream-copy only — ~4s for a 1.5GB file on SSD. Result is cached.
+ */
+function ensureSeekableRemux(cleanPath, format) {
+  return new Promise((resolve, reject) => {
+    const outPath = remuxCachePath(cleanPath);
+    if (!outPath) return reject(new Error('Cannot remux: missing file'));
+    if (fs.existsSync(outPath)) {
+      try {
+        if (fs.statSync(outPath).size > 1024) {
+          console.log(`[Remux] Cache hit (${format}): ${outPath}`);
+          return resolve(outPath);
+        }
+      } catch (_) {}
+    }
+
+    console.log(`[Remux] Converting ${format} → seekable MP4: ${cleanPath}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('remux-progress', { phase: 'start', format });
+    }
+
+    const args = [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      '-fflags', '+genpts',
+      '-i', cleanPath,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      '-avoid_negative_ts', 'make_zero',
+      outPath
+    ];
+    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    let errBuf = '';
+    proc.stderr.on('data', (d) => { errBuf += d.toString(); });
+    proc.on('error', (err) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('remux-progress', { phase: 'error' });
+      }
+      reject(err);
+    });
+    proc.on('close', (code) => {
+      if (code === 0 && fs.existsSync(outPath) && fs.statSync(outPath).size > 1024) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('remux-progress', { phase: 'done' });
+        }
+        console.log(`[Remux] Done: ${outPath}`);
+        resolve(outPath);
+      } else {
+        try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('remux-progress', { phase: 'error' });
+        }
+        reject(new Error(errBuf || `Remux failed with code ${code}`));
+      }
+    });
+  });
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -393,25 +489,55 @@ app.whenReady().then(() => {
 ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
   const port = await startStreamServer();
   
-  const cleanPath = resolveLocalMediaPath(filePath);
+  let cleanPath = resolveLocalMediaPath(filePath);
   
   const ext = path.extname(cleanPath).toLowerCase();
   const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
-  const willTranscode = transcode || needsFullTranscode;
+  let willTranscode = transcode || needsFullTranscode;
+
+  // Detect fake extensions: e.g. MPEG-TS saved as .mp4 — Chromium freezes ~1s on every seek
+  const format = await probeInputFormat(cleanPath);
+  const needsRemux = !willTranscode && format && UNSEEKABLE_FORMATS.has(format);
+
+  if (needsRemux) {
+    try {
+      cleanPath = await ensureSeekableRemux(cleanPath, format);
+      // Remuxed file is real MP4 — play via file:// (no live transcode)
+      willTranscode = false;
+    } catch (err) {
+      console.error('[Remux] Failed, falling back to stream remux:', err.message);
+      willTranscode = true;
+    }
+  }
 
   const duration = await getVideoDuration(cleanPath);
   let fileSize = 0;
   try { fileSize = fs.statSync(cleanPath).size; } catch (_) {}
 
-  // Direct file:// for seekable formats — Chromium reads disk natively (far smoother than HTTP Range).
-  // Keep local HTTP+FFmpeg only when remux/transcode is required.
+  // Direct file:// for seekable formats — Chromium reads disk natively.
   if (!willTranscode) {
     const url = pathToFileURL(cleanPath).href;
-    return { url, duration, isTranscoded: false, localPath: cleanPath, fileSize };
+    return {
+      url,
+      duration,
+      isTranscoded: false,
+      localPath: cleanPath,
+      fileSize,
+      remuxed: needsRemux,
+      format: format || null
+    };
   }
 
   const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}&transcode=true`;
-  return { url, duration, isTranscoded: true, localPath: cleanPath, fileSize };
+  return {
+    url,
+    duration,
+    isTranscoded: true,
+    localPath: cleanPath,
+    fileSize,
+    remuxed: false,
+    format: format || null
+  };
 });
 
 /** Fast JPEG frame at timestamp for scrub preview (does not touch the <video> decoder). */

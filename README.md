@@ -26,7 +26,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## Key Features
 
-* **Seek Hotfix (v1.1.67)**: Removes the stuck scrub overlay from v1.1.66 that could freeze the picture while audio continued — seeking resumes video reliably again.
+* **Smart Remux Seeking (v1.1.68)**: Detects MPEG-TS (and similar) files mislabeled as `.mp4` and remuxes them once to real seekable MP4 — fixes the ~1s freeze on certain large files.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
@@ -123,6 +123,15 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ---
 
 ---
+
+## Release Notes v1.1.68
+
+Fixes seek freezes on large files that are MPEG-TS (or similar) despite a `.mp4` extension:
+
+* **Root cause:** Some “`.mp4`” files are actually MPEG-TS — Chromium freezes about 1 second on every seek.
+* **Fix:** Detect real container, remux once with stream-copy to a real MP4 + faststart (quality preserved), then play that file.
+* **Cached:** Next open of the same file skips remux and seeks immediately.
+* **Automatic update:** Installed apps receive v1.1.68 via the built-in updater after release assets are published.
 
 ## Release Notes v1.1.67
 

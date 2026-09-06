@@ -1,24 +1,14 @@
-# Doggy Player v1.1.67
+# Doggy Player v1.1.68
 
-Hotfix: removes the FFmpeg scrub-preview overlay that could freeze the picture while audio kept playing.
+Fixes 1-second seek freezes on files that look like `.mp4` but are actually MPEG-TS (or other unseekable containers).
 
 ## What's Changed
 
-- **Removed stuck image overlay:** The v1.1.66 JPEG preview could remain on top of the video after seeking — picture frozen, audio still playing. That overlay is gone.
-- **Reliable resume after seek:** Playback is forced to resume after seek completes so video and audio stay in sync.
-- **Simpler seek path:** Debounced / last-wins seeking without covering the `<video>` element.
+- **Detect real container format:** Probes files with FFmpeg instead of trusting the file extension.
+- **Auto-remux for smooth seeking:** MPEG-TS and similar containers are stream-copied once to a real MP4 with `faststart` (keeps quality, ~a few seconds for ~1.5GB) and cached for next time.
+- **Example:** `AvratbazAbi14.mp4` was MPEG-TS with an `.mp4` name — Chromium froze ~1s on every seek. After remux it seeks like a normal MP4.
 - **Auto-update for all platforms:** Windows (`latest.yml`), macOS (`latest-mac.yml`) and Linux (`latest-linux.yml`) are published to GitHub Releases.
 
 ## Upgrade
 
-Existing Doggy Player installations will receive v1.1.67 automatically via the built-in updater after the release assets have finished building and publishing.
-
----
-
-# Doggy Player v1.1.66
-
-This release attempted FFmpeg scrub previews for large-file seeking (superseded by v1.1.67).
-
-## Upgrade
-
-Please update to v1.1.67.
+Existing Doggy Player installations will receive v1.1.68 automatically via the built-in updater after the release assets have finished building and publishing.

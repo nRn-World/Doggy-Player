@@ -510,6 +510,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [realVideoUrl, setRealVideoUrl] = useState<string | null>(null);
+  const [isRemuxing, setIsRemuxing] = useState(false);
 
   // Function to determine if a URL should be handled by hls.js
   const isHlsStream = (url: string) => {
@@ -591,8 +592,16 @@ export default function App() {
       if (isLocalPath && (window as any).require) {
         try {
           const { ipcRenderer } = (window as any).require('electron');
-          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((res: { url: string, duration: number, localPath?: string, fileSize?: number }) => {
-            console.log("🎬 Generated Stream URL:", res.url, "Duration:", res.duration);
+          setIsRemuxing(true);
+          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((res: {
+            url: string;
+            duration: number;
+            localPath?: string;
+            fileSize?: number;
+            remuxed?: boolean;
+            format?: string | null;
+          }) => {
+            console.log("🎬 Generated Stream URL:", res.url, "Duration:", res.duration, "format:", res.format, "remuxed:", res.remuxed);
             streamSeekOffsetRef.current = 0;
             streamDurationRef.current = res.duration;
             localMediaPathRef.current = res.localPath || videoSrc;
@@ -601,12 +610,15 @@ export default function App() {
             if (res.duration > 0) {
               setDuration(res.duration);
             }
+            setIsRemuxing(false);
           }).catch((err: any) => {
             console.error("❌ IPC Invoke Error:", err);
+            setIsRemuxing(false);
             setRealVideoUrl(videoSrc);
           });
         } catch (e) {
           console.error("❌ IPC Require Error:", e);
+          setIsRemuxing(false);
           setRealVideoUrl(videoSrc);
         }
       } else {
@@ -635,6 +647,7 @@ export default function App() {
   // Reset transcoding when videoSrc changes
   useEffect(() => {
     setIsTranscoding(false);
+    setIsRemuxing(false);
   }, [videoSrc]);
 
   // Handle play/pause sync
@@ -3054,6 +3067,18 @@ export default function App() {
                  </div>
                  <h2 className="text-3xl font-bold text-white mb-3 max-w-2xl text-center truncate shadow-sm">{playlist[currentIndex]?.name}</h2>
                  <p className="text-theme-accent tracking-[0.4em] uppercase text-[10px] font-black animate-pulse">Tuning Frequency...</p>
+              </div>
+            )}
+
+            {isRemuxing && (
+              <div className="absolute inset-0 z-[41] flex flex-col items-center justify-center bg-black/80 pointer-events-none">
+                <div className="w-10 h-10 border-2 border-white/30 border-t-white rounded-full animate-spin mb-4" />
+                <p className="text-white text-sm font-medium">
+                  {language === 'sv' ? 'Optimerar filen för spolning…' : language === 'tr' ? 'Dosya sarma için optimize ediliyor…' : 'Optimizing file for seeking…'}
+                </p>
+                <p className="text-white/60 text-xs mt-2">
+                  {language === 'sv' ? 'Engångskonvertering (behåller kvalitet)' : language === 'tr' ? 'Tek seferlik dönüştürme (kalite korunur)' : 'One-time remux (quality preserved)'}
+                </p>
               </div>
             )}
 
