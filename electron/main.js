@@ -8,12 +8,15 @@ import express from 'express';
 import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegPath from 'ffmpeg-static';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 
 process.env.UV_THREADPOOL_SIZE = '64';
 
 /** Active FFmpeg pipe per response — kill previous on new seek to avoid decoder pile-up */
 let activeTranscodeCommand = null;
+/** Latest frame-extract process (scrub preview) */
+let activeFrameExtract = null;
+let frameExtractGen = 0;
 
 let ffmpegExePath = ffmpegPath;
 if (app.isPackaged) {
@@ -27,6 +30,18 @@ const __dirname = path.dirname(__filename);
 let mainWindow = null;
 let streamServer = null;
 let streamPort = 3001;
+
+function resolveLocalMediaPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return '';
+  let cleanPath = filePath;
+  if (cleanPath.startsWith('file:///')) cleanPath = cleanPath.slice(8);
+  else if (cleanPath.startsWith('file://')) cleanPath = cleanPath.slice(7);
+  if (process.platform === 'win32') {
+    try { cleanPath = decodeURIComponent(cleanPath); } catch (_) {}
+    cleanPath = cleanPath.replace(/\//g, '\\');
+  }
+  return cleanPath;
+}
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Prefer hardware decode / larger media cache when available — helps seek on big files
@@ -378,29 +393,74 @@ app.whenReady().then(() => {
 ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
   const port = await startStreamServer();
   
-  let cleanPath = filePath;
-  if (cleanPath.startsWith('file:///')) cleanPath = cleanPath.slice(8);
-  else if (cleanPath.startsWith('file://')) cleanPath = cleanPath.slice(7);
-  if (process.platform === 'win32') {
-    try { cleanPath = decodeURIComponent(cleanPath); } catch(e) {}
-    cleanPath = cleanPath.replace(/\//g, '\\');
-  }
+  const cleanPath = resolveLocalMediaPath(filePath);
   
   const ext = path.extname(cleanPath).toLowerCase();
   const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
   const willTranscode = transcode || needsFullTranscode;
 
   const duration = await getVideoDuration(cleanPath);
+  let fileSize = 0;
+  try { fileSize = fs.statSync(cleanPath).size; } catch (_) {}
 
   // Direct file:// for seekable formats — Chromium reads disk natively (far smoother than HTTP Range).
   // Keep local HTTP+FFmpeg only when remux/transcode is required.
   if (!willTranscode) {
     const url = pathToFileURL(cleanPath).href;
-    return { url, duration, isTranscoded: false };
+    return { url, duration, isTranscoded: false, localPath: cleanPath, fileSize };
   }
 
   const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}&transcode=true`;
-  return { url, duration, isTranscoded: true };
+  return { url, duration, isTranscoded: true, localPath: cleanPath, fileSize };
+});
+
+/** Fast JPEG frame at timestamp for scrub preview (does not touch the <video> decoder). */
+ipcMain.handle('extract-seek-frame', async (event, filePath, timeSec) => {
+  const cleanPath = resolveLocalMediaPath(filePath);
+  if (!cleanPath || !fs.existsSync(cleanPath)) return null;
+
+  const gen = ++frameExtractGen;
+  if (activeFrameExtract) {
+    try { activeFrameExtract.kill('SIGKILL'); } catch (_) {}
+    activeFrameExtract = null;
+  }
+
+  return new Promise((resolve) => {
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      '-ss', String(Math.max(0, Number(timeSec) || 0)),
+      '-i', cleanPath,
+      '-frames:v', '1',
+      '-an',
+      '-vf', 'scale=960:-2:flags=fast_bilinear',
+      '-q:v', '6',
+      '-f', 'image2pipe',
+      '-vcodec', 'mjpeg',
+      'pipe:1'
+    ];
+    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    activeFrameExtract = proc;
+    const chunks = [];
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (activeFrameExtract === proc) activeFrameExtract = null;
+      resolve(result);
+    };
+    proc.stdout.on('data', (c) => chunks.push(c));
+    proc.stderr.on('data', () => {});
+    proc.on('error', () => finish(null));
+    proc.on('close', () => {
+      if (gen !== frameExtractGen) return finish(null);
+      if (!chunks.length) return finish(null);
+      finish(`data:image/jpeg;base64,${Buffer.concat(chunks).toString('base64')}`);
+    });
+    setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch (_) {}
+      if (!settled) finish(null);
+    }, 2500);
+  });
 });
 
 app.on('window-all-closed', () => {

@@ -26,7 +26,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## Key Features
 
-* **Freeze-Free Seeking (New in v1.1.65)**: Large/HQ files seek without freezing — direct `file://` playback, pause-before-seek, coalesced scrub queue and smarter hold-to-seek.
+* **Freeze-Free Seeking (New in v1.1.66)**: Hold ←/→ or scrub the timeline on large files with live FFmpeg frame previews — the video decoder only seeks once on release, so playback no longer freezes then jumps.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
@@ -123,6 +123,15 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ---
 
 ---
+
+## Release Notes v1.1.66
+
+Doggy Player v1.1.66 fixes the remaining freeze when seeking large/HQ videos with arrow keys or the timeline:
+
+* **Live scrub preview:** Holding ←/→ or dragging the timeline shows FFmpeg JPEG frames on top of the video so the picture keeps updating.
+* **Seek once on release:** The real `<video>` seek runs only when you release keys/mouse — no stacked freezes on big files.
+* **fastSeek, no pause-first:** Single seeks use keyframe seeking without pausing first (which made freezes worse in v1.1.65).
+* **Automatic update:** Installed apps receive v1.1.66 via the built-in updater after release assets are published.
 
 ## Release Notes v1.1.65
 
