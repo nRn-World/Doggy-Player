@@ -666,7 +666,6 @@ export default function App() {
   const streamSeekOffsetRef = useRef<number>(0); // Tracks seek offset for transcoded streams
   const localMediaPathRef = useRef<string | null>(null);
   const mediaFileSizeRef = useRef<number>(0);
-  const [scrubPreviewUrl, setScrubPreviewUrl] = useState<string | null>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -2101,7 +2100,6 @@ export default function App() {
   const wasPlayingBeforeSeekRef = useRef(false);
   const holdSeekIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const holdSeekDeltaRef = useRef<number>(0);
-  /** Absolute timeline target while user holds ←/→ — UI + FFmpeg preview, media seek only on release */
   const holdSeekTargetRef = useRef<number | null>(null);
   const queuedSeekTargetRef = useRef<number | null>(null);
   const seekInFlightRef = useRef(false);
@@ -2109,8 +2107,6 @@ export default function App() {
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewTimeRef = useRef(0);
-  const scrubFrameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrubFrameReqIdRef = useRef(0);
 
   const isTranscodedStream = () =>
     !!(realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true'));
@@ -2120,50 +2116,6 @@ export default function App() {
     return Math.max(0, Math.min(Number.isFinite(dur) ? dur : Infinity, t));
   };
 
-  /** Large/HQ local files: Chromium seek is slow — use FFmpeg JPEG overlay while scrubbing */
-  const needsScrubPreview = () => {
-    if (isHlsStream(videoSrc || '')) return false;
-    if (isTranscodedStream()) return false;
-    const size = mediaFileSizeRef.current;
-    const dur = streamDurationRef.current || duration || 0;
-    // Catch 4K / long encodes early — freeze is worst above ~80MB or ~10 min
-    return size >= 80 * 1024 * 1024 || dur >= 10 * 60 || size === 0 && dur >= 5 * 60;
-  };
-
-  /** Any local (non-HLS) file: during hold-seek, never hammer <video> — preview until keyup */
-  const isLocalDiskMedia = () => {
-    if (isHlsStream(videoSrc || '')) return false;
-    if (isTranscodedStream()) return false;
-    return !!(localMediaPathRef.current || videoSrc);
-  };
-
-  const clearScrubPreview = () => {
-    scrubFrameReqIdRef.current += 1;
-    if (scrubFrameTimerRef.current) {
-      clearTimeout(scrubFrameTimerRef.current);
-      scrubFrameTimerRef.current = null;
-    }
-    setScrubPreviewUrl(null);
-  };
-
-  const requestScrubFrame = (timeSec: number) => {
-    const pathForFfmpeg = localMediaPathRef.current || videoSrc;
-    if (!pathForFfmpeg || !(window as any).require) return;
-    if (scrubFrameTimerRef.current) clearTimeout(scrubFrameTimerRef.current);
-    scrubFrameTimerRef.current = setTimeout(() => {
-      scrubFrameTimerRef.current = null;
-      const reqId = ++scrubFrameReqIdRef.current;
-      try {
-        const { ipcRenderer } = (window as any).require('electron');
-        ipcRenderer.invoke('extract-seek-frame', pathForFfmpeg, timeSec).then((dataUrl: string | null) => {
-          if (reqId !== scrubFrameReqIdRef.current) return;
-          if (dataUrl) setScrubPreviewUrl(dataUrl);
-        }).catch(() => {});
-      } catch { /* ignore */ }
-    }, 60);
-  };
-
-  // Seek helper for transcoded streams (debounced — each seek restarts FFmpeg)
   const seekTranscoded = (newTime: number) => {
     const clampedTime = clampSeekTime(newTime);
     streamSeekOffsetRef.current = clampedTime;
@@ -2171,7 +2123,6 @@ export default function App() {
     wasPlayingBeforeSeekRef.current = wasPlayingBeforeSeekRef.current || !!(videoRef.current && !videoRef.current.paused);
     isSeekingRef.current = true;
     setIsSeeking(true);
-    requestScrubFrame(clampedTime);
     if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
     transcodeSeekTimerRef.current = setTimeout(() => {
       transcodeSeekTimerRef.current = null;
@@ -2179,15 +2130,11 @@ export default function App() {
         const baseUrl = realVideoUrl.split('&start=')[0];
         setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
       }
-    }, 280);
+    }, 300);
   };
 
-  /**
-   * Commit a real media seek. Prefer fastSeek (keyframe) — never pause first
-   * (pause made freezes more visible). During hold/scrub, callers should mostly
-   * update UI + FFmpeg preview and only call this on release.
-   */
-  const applyMediaSeek = (rawTarget: number, opts?: { showPreview?: boolean }) => {
+  /** Apply one media seek. Never leave an overlay on top of the video. */
+  const applyMediaSeek = (rawTarget: number) => {
     if (!videoRef.current) return;
     const target = clampSeekTime(rawTarget);
     setCurrentTime(target);
@@ -2195,10 +2142,6 @@ export default function App() {
     if (isTranscodedStream()) {
       seekTranscoded(target);
       return;
-    }
-
-    if (opts?.showPreview || needsScrubPreview()) {
-      requestScrubFrame(target);
     }
 
     if (seekInFlightRef.current) {
@@ -2210,15 +2153,16 @@ export default function App() {
     seekInFlightRef.current = true;
     isSeekingRef.current = true;
     setIsSeeking(true);
-    wasPlayingBeforeSeekRef.current = !v.paused || wasPlayingBeforeSeekRef.current;
+    wasPlayingBeforeSeekRef.current = !v.paused || wasPlayingBeforeSeekRef.current || isPlaying;
 
     try {
-      const anyV: any = v;
-      // fastSeek = nearest keyframe (much faster on large files than precise currentTime)
-      if (typeof anyV.fastSeek === 'function') anyV.fastSeek(target);
-      else v.currentTime = target;
+      // Prefer precise currentTime — keeps A/V in sync after seek
+      v.currentTime = target;
     } catch {
-      try { v.currentTime = target; } catch { /* ignore */ }
+      try {
+        const anyV: any = v;
+        if (typeof anyV.fastSeek === 'function') anyV.fastSeek(target);
+      } catch { /* ignore */ }
     }
   };
 
@@ -2228,7 +2172,7 @@ export default function App() {
       queuedSeekTargetRef.current = null;
       seekInFlightRef.current = false;
       const cur = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
-      if (Math.abs(next - cur) > 0.12) {
+      if (Math.abs(next - cur) > 0.15) {
         applyMediaSeek(next);
         return;
       }
@@ -2238,20 +2182,17 @@ export default function App() {
     isSeekingRef.current = false;
     setIsSeeking(false);
 
-    // Hide FFmpeg overlay once the real video frame is ready (unless still scrubbing)
-    if (!isScrubbingRef.current && holdSeekIntervalRef.current === null) {
-      clearScrubPreview();
-    }
-
     const raw = videoRef.current?.currentTime || 0;
     setCurrentTime(streamSeekOffsetRef.current + raw);
 
+    // Always resume playback after seek if we were playing — never leave video "stuck" paused
     if (
-      wasPlayingBeforeSeekRef.current &&
+      (wasPlayingBeforeSeekRef.current || isPlaying) &&
       !isScrubbingRef.current &&
       holdSeekIntervalRef.current === null &&
-      videoRef.current?.paused
+      videoRef.current
     ) {
+      wasPlayingBeforeSeekRef.current = false;
       videoRef.current.play().catch(() => {});
     }
   };
@@ -2265,7 +2206,7 @@ export default function App() {
     pendingSeekDeltaRef.current = 0;
     if (!videoRef.current || delta === 0) return;
     const base = holdSeekTargetRef.current ?? (streamSeekOffsetRef.current + videoRef.current.currentTime);
-    applyMediaSeek(base + delta, { showPreview: needsScrubPreview() });
+    applyMediaSeek(base + delta);
   };
 
   const scheduleSeekDelta = (delta: number) => {
@@ -2274,42 +2215,30 @@ export default function App() {
     const base = streamSeekOffsetRef.current + videoRef.current.currentTime;
     const target = clampSeekTime(base + pendingSeekDeltaRef.current);
     setCurrentTime(target);
-    if (needsScrubPreview()) requestScrubFrame(target);
     if (pendingSeekTimerRef.current) clearTimeout(pendingSeekTimerRef.current);
-    pendingSeekTimerRef.current = setTimeout(flushPendingSeek, 50);
+    pendingSeekTimerRef.current = setTimeout(flushPendingSeek, 60);
   };
 
   const startHoldSeek = (delta: number) => {
     if (holdSeekIntervalRef.current) return;
     holdSeekDeltaRef.current = delta;
-    wasPlayingBeforeSeekRef.current = !!(videoRef.current && !videoRef.current.paused) || wasPlayingBeforeSeekRef.current;
+    wasPlayingBeforeSeekRef.current = !!(videoRef.current && !videoRef.current.paused) || wasPlayingBeforeSeekRef.current || isPlaying;
     const startBase = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
     holdSeekTargetRef.current = clampSeekTime(startBase + delta);
     setCurrentTime(holdSeekTargetRef.current);
+    applyMediaSeek(holdSeekTargetRef.current);
 
-    // Soft-pause only the decoder during continuous scrub so it doesn't fight previews
-    if (videoRef.current && !videoRef.current.paused) {
-      try { videoRef.current.pause(); } catch { /* ignore */ }
-    }
-
-    // Preview first frame immediately; do NOT seek the <video> every tick on local files
-    requestScrubFrame(holdSeekTargetRef.current);
-    if (!isLocalDiskMedia()) {
-      applyMediaSeek(holdSeekTargetRef.current);
-    }
-
+    // Update UI often; queue media seeks (last-wins) so we don't stack decoder work
     holdSeekIntervalRef.current = setInterval(() => {
       if (holdSeekTargetRef.current === null) return;
       holdSeekTargetRef.current = clampSeekTime(holdSeekTargetRef.current + holdSeekDeltaRef.current);
       setCurrentTime(holdSeekTargetRef.current);
-      requestScrubFrame(holdSeekTargetRef.current);
-      // Remote only: occasional seek while holding. Local disk: FFmpeg preview until keyup.
-      if (!isLocalDiskMedia() && !seekInFlightRef.current) {
-        applyMediaSeek(holdSeekTargetRef.current);
-      } else if (!isLocalDiskMedia()) {
+      if (seekInFlightRef.current) {
         queuedSeekTargetRef.current = holdSeekTargetRef.current;
+      } else {
+        applyMediaSeek(holdSeekTargetRef.current);
       }
-    }, 100);
+    }, 200);
   };
 
   const stopHoldSeek = () => {
@@ -2319,8 +2248,7 @@ export default function App() {
     }
     holdSeekDeltaRef.current = 0;
     if (holdSeekTargetRef.current !== null) {
-      // One real commit when user releases arrows
-      applyMediaSeek(holdSeekTargetRef.current, { showPreview: true });
+      applyMediaSeek(holdSeekTargetRef.current);
       holdSeekTargetRef.current = null;
     }
     if (pendingSeekTimerRef.current) {
@@ -2336,24 +2264,18 @@ export default function App() {
     }
     if (timelineSeekRef.current === null || !videoRef.current) return;
     const t = timelineSeekRef.current;
-    // While dragging large files: keep target, preview only. Commit on mouseup.
-    if (isScrubbingRef.current && needsScrubPreview()) {
-      requestScrubFrame(t);
-      return;
-    }
     timelineSeekRef.current = null;
-    applyMediaSeek(t, { showPreview: needsScrubPreview() });
+    applyMediaSeek(t);
   };
 
   const scheduleTimelineSeek = (t: number, opts?: { immediate?: boolean }) => {
     setCurrentTime(t);
     timelineSeekRef.current = t;
-    if (needsScrubPreview()) requestScrubFrame(t);
     if (timelineSeekTimerRef.current) clearTimeout(timelineSeekTimerRef.current);
     if (opts?.immediate) {
       flushTimelineSeek();
     } else {
-      timelineSeekTimerRef.current = setTimeout(flushTimelineSeek, isScrubbingRef.current && needsScrubPreview() ? 40 : 100);
+      timelineSeekTimerRef.current = setTimeout(flushTimelineSeek, isScrubbingRef.current ? 120 : 80);
     }
   };
 
@@ -2364,7 +2286,6 @@ export default function App() {
       if (holdSeekIntervalRef.current) clearInterval(holdSeekIntervalRef.current);
       if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
       if (previewSeekTimerRef.current) clearTimeout(previewSeekTimerRef.current);
-      if (scrubFrameTimerRef.current) clearTimeout(scrubFrameTimerRef.current);
     };
   }, []);
 
@@ -2376,7 +2297,6 @@ export default function App() {
     isScrubbingRef.current = false;
     wasPlayingBeforeSeekRef.current = false;
     setIsSeeking(false);
-    clearScrubPreview();
     localMediaPathRef.current = null;
     mediaFileSizeRef.current = 0;
     timelineSeekRef.current = null;
@@ -2840,8 +2760,9 @@ export default function App() {
     if (timelineSeekRef.current !== null) {
       const t = timelineSeekRef.current;
       timelineSeekRef.current = null;
-      applyMediaSeek(t, { showPreview: needsScrubPreview() });
-    } else if (wasPlayingBeforeSeekRef.current && videoRef.current?.paused) {
+      applyMediaSeek(t);
+    } else if ((wasPlayingBeforeSeekRef.current || isPlaying) && videoRef.current?.paused) {
+      wasPlayingBeforeSeekRef.current = false;
       videoRef.current.play().catch(() => {});
     }
   };
@@ -3281,18 +3202,8 @@ export default function App() {
               }}
             />
 
-            {/* FFmpeg scrub preview — covers frozen <video> frame on large files while seeking */}
-            {scrubPreviewUrl && !isHlsStream(videoSrc || '') && (
-              <img
-                src={scrubPreviewUrl}
-                alt=""
-                className="absolute inset-0 w-full h-full object-contain pointer-events-none z-25"
-                style={{ zIndex: 25 }}
-              />
-            )}
-
-            {/* Seeking indicator — only when no scrub frame yet */}
-            {isSeeking && !scrubPreviewUrl && !isHlsStream(videoSrc || '') && (
+            {/* Seeking indicator */}
+            {isSeeking && !isHlsStream(videoSrc || '') && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
                 <div className="bg-black/50 backdrop-blur-sm rounded-full p-3">
                   <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />

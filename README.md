@@ -26,7 +26,7 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## Key Features
 
-* **Freeze-Free Seeking (New in v1.1.66)**: Hold ←/→ or scrub the timeline on large files with live FFmpeg frame previews — the video decoder only seeks once on release, so playback no longer freezes then jumps.
+* **Seek Hotfix (v1.1.67)**: Removes the stuck scrub overlay from v1.1.66 that could freeze the picture while audio continued — seeking resumes video reliably again.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
 * **Video Rotation Controls**: Rotate with `Alt + Arrow keys` and reset to the original orientation at any time.
@@ -123,6 +123,14 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 ---
 
 ---
+
+## Release Notes v1.1.67
+
+Hotfix for a regression in v1.1.66:
+
+* **Frozen picture / working audio:** Removed the FFmpeg scrub-preview overlay that could stay on top of the video after seeking.
+* **Reliable resume:** Video playback is forced to continue after seek so picture and sound stay together.
+* **Automatic update:** Installed apps receive v1.1.67 via the built-in updater after release assets are published.
 
 ## Release Notes v1.1.66
 
