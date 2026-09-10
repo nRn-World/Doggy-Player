@@ -6,15 +6,18 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Unguessable counter namespace — not linked from the UI. */
 const NS = 'nRnDp7kQ2mX9pL4';
 const API = 'https://abacus.jasoncameron.dev';
 const DAYS = 30;
 const PING_DELAY_MS = 12_000;
 const FETCH_TIMEOUT_MS = 4000;
+const GATE_USER = Buffer.from('QURNSU4=', 'base64').toString('utf8');
+const GATE_PASS = Buffer.from('TklNREEx', 'base64').toString('utf8');
 
 let statsWindow = null;
+let statsAuthed = false;
 let ipcRegistered = false;
+let pingTimer = null;
 
 function utcDay(offset = 0) {
   const d = new Date();
@@ -40,6 +43,31 @@ function writeState(state) {
   } catch (_) {}
 }
 
+function isOwnerInstall() {
+  return readState().owner === true;
+}
+
+function markOwnerInstall() {
+  const state = readState();
+  if (!state.id) state.id = crypto.randomUUID();
+  state.owner = true;
+  writeState(state);
+}
+
+function safeEqual(input, expected) {
+  const left = Buffer.from(String(input ?? ''), 'utf8');
+  const right = Buffer.from(String(expected ?? ''), 'utf8');
+  if (left.length !== right.length) {
+    crypto.timingSafeEqual(right, right);
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
+function isStatsSender(event) {
+  return !!statsWindow && !statsWindow.isDestroyed() && event.sender === statsWindow.webContents;
+}
+
 async function fetchJson(url) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
@@ -59,8 +87,16 @@ function countFrom(data) {
   return data.value;
 }
 
+function cancelPendingPing() {
+  if (pingTimer) {
+    clearTimeout(pingTimer);
+    pingTimer = null;
+  }
+}
+
 export async function sendDailyPing() {
   if (!app.isPackaged) return;
+  if (isOwnerInstall()) return;
 
   const today = utcDay(0);
   const state = readState();
@@ -95,21 +131,25 @@ async function loadDailyCounts() {
   const last30 = rows.reduce((sum, row) => sum + row.count, 0);
   const offline = results.every((item) => item == null);
 
-  return { rows, today, yesterday, last7, last30, offline, generatedAt: new Date().toISOString() };
+  return { ok: true, rows, today, yesterday, last7, last30, offline, generatedAt: new Date().toISOString() };
 }
 
 function openStatsWindow() {
+  cancelPendingPing();
+
   if (statsWindow && !statsWindow.isDestroyed()) {
     statsWindow.show();
     statsWindow.focus();
     return;
   }
 
+  statsAuthed = false;
   statsWindow = new BrowserWindow({
-    width: 520,
-    height: 720,
-    minWidth: 420,
-    minHeight: 560,
+    width: 380,
+    height: 300,
+    resizable: false,
+    minimizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true,
     icon: path.join(__dirname, '../Logo Bilder/logoW-cropped-no-bg1024x1024.png'),
     webPreferences: {
@@ -121,25 +161,57 @@ function openStatsWindow() {
   statsWindow.setMenuBarVisibility(false);
   statsWindow.loadFile(path.join(__dirname, 'usage-stats.html'));
   statsWindow.on('closed', () => {
+    statsAuthed = false;
     statsWindow = null;
+    if (!isOwnerInstall()) {
+      sendDailyPing().catch(() => {});
+    }
   });
+}
+
+function revealStatsWindow() {
+  if (!statsWindow || statsWindow.isDestroyed()) return;
+  statsWindow.setResizable(true);
+  statsWindow.setMinimumSize(420, 560);
+  statsWindow.setSize(520, 720, false);
+  statsWindow.center();
 }
 
 export function initUsageTelemetry() {
   if (!ipcRegistered) {
     ipcRegistered = true;
-    ipcMain.handle('creator-stats:load', () => loadDailyCounts());
+
+    ipcMain.handle('creator-stats:login', (event, payload = {}) => {
+      if (!isStatsSender(event)) return { ok: false };
+      const name = String(payload.name ?? '').trim();
+      const password = String(payload.password ?? '');
+      if (!safeEqual(name, GATE_USER) || !safeEqual(password, GATE_PASS)) {
+        return { ok: false };
+      }
+      statsAuthed = true;
+      markOwnerInstall();
+      cancelPendingPing();
+      revealStatsWindow();
+      return { ok: true };
+    });
+
+    ipcMain.handle('creator-stats:load', (event) => {
+      if (!statsAuthed || !isStatsSender(event)) return { ok: false };
+      return loadDailyCounts();
+    });
   }
 
   globalShortcut.register('CommandOrControl+Alt+Shift+D', () => {
     openStatsWindow();
   });
 
-  setTimeout(() => {
+  pingTimer = setTimeout(() => {
+    pingTimer = null;
     sendDailyPing().catch(() => {});
   }, PING_DELAY_MS);
 }
 
 export function unregisterUsageTelemetry() {
+  cancelPendingPing();
   try { globalShortcut.unregister('CommandOrControl+Alt+Shift+D'); } catch (_) {}
 }

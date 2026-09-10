@@ -22,6 +22,33 @@
       font-family: Segoe UI, system-ui, sans-serif;
     }
     body { padding: 22px; }
+    #gate {
+      height: calc(100vh - 44px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    #panel { display: none; }
+    label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input {
+      width: 100%;
+      margin-bottom: 14px;
+      background: var(--card);
+      border: 1px solid #262626;
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    input:focus { border-color: var(--accent); }
     h1 {
       font-size: 15px;
       letter-spacing: 0.14em;
@@ -45,7 +72,6 @@
       border-radius: 12px;
       padding: 14px 16px;
     }
-    .card.wide { grid-column: 1 / -1; }
     .label {
       font-size: 10px;
       letter-spacing: 0.12em;
@@ -101,7 +127,7 @@
     }
     .error { color: #f87171; }
     button {
-      margin-top: 14px;
+      margin-top: 4px;
       background: var(--bar);
       color: #fff;
       border: 0;
@@ -111,33 +137,48 @@
       font-weight: 600;
     }
     button:hover { background: var(--accent); }
+    #gate button { width: 100%; margin-top: 2px; padding: 10px 14px; }
   </style>
 </head>
 <body>
-  <h1>Dagliga användare</h1>
-  <p class="sub">Anonyma öppningar · en ping per dator och dag · UTC</p>
-  <div class="cards">
-    <div class="card">
-      <div class="label">Idag</div>
-      <div class="value" id="today">–</div>
-    </div>
-    <div class="card">
-      <div class="label">Igår</div>
-      <div class="value" id="yesterday">–</div>
-    </div>
-    <div class="card">
-      <div class="label">7 dagar</div>
-      <div class="value" id="last7">–</div>
-    </div>
-    <div class="card">
-      <div class="label">30 dagar</div>
-      <div class="value" id="last30">–</div>
-    </div>
+  <div id="gate">
+    <form id="gate-form" autocomplete="off">
+      <label for="name">Namn</label>
+      <input id="name" name="username" type="text" spellcheck="false" autocomplete="off" />
+      <label for="password">Lösenord</label>
+      <input id="password" name="password" type="password" autocomplete="off" />
+      <button type="submit">OK</button>
+      <div class="status error" id="gate-error"></div>
+    </form>
   </div>
-  <div class="chart" id="chart"></div>
-  <p class="hint">Siffran är unika installationer som öppnat Doggy Player den dagen, inte visningar.</p>
-  <div class="status" id="status">Hämtar…</div>
-  <button id="reload">Uppdatera</button>
+
+  <div id="panel">
+    <h1>Dagliga användare</h1>
+    <p class="sub">Andras installationer · en ping per dator och dag · UTC</p>
+    <div class="cards">
+      <div class="card">
+        <div class="label">Idag</div>
+        <div class="value" id="today">–</div>
+      </div>
+      <div class="card">
+        <div class="label">Igår</div>
+        <div class="value" id="yesterday">–</div>
+      </div>
+      <div class="card">
+        <div class="label">7 dagar</div>
+        <div class="value" id="last7">–</div>
+      </div>
+      <div class="card">
+        <div class="label">30 dagar</div>
+        <div class="value" id="last30">–</div>
+      </div>
+    </div>
+    <div class="chart" id="chart"></div>
+    <p class="hint">Din egen dator räknas inte. Siffran är unika installationer som öppnat Doggy Player den dagen.</p>
+    <div class="status" id="status">Hämtar…</div>
+    <button id="reload" type="button">Uppdatera</button>
+  </div>
+
   <script>
     const { ipcRenderer } = require('electron');
 
@@ -151,6 +192,11 @@
       status.textContent = 'Hämtar…';
       try {
         const data = await ipcRenderer.invoke('creator-stats:load');
+        if (!data || !data.ok) {
+          status.className = 'status error';
+          status.textContent = 'Kunde inte läsa statistiken.';
+          return;
+        }
         if (data.offline) {
           status.className = 'status error';
           status.textContent = 'Kunde inte nå räknaren. Kontrollera internet och försök igen.';
@@ -181,8 +227,26 @@
       }
     }
 
+    document.getElementById('gate-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const error = document.getElementById('gate-error');
+      error.textContent = '';
+      const name = document.getElementById('name').value;
+      const password = document.getElementById('password').value;
+      const result = await ipcRenderer.invoke('creator-stats:login', { name, password });
+      if (!result || !result.ok) {
+        error.textContent = 'Felaktiga uppgifter.';
+        document.getElementById('password').value = '';
+        document.getElementById('password').focus();
+        return;
+      }
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('panel').style.display = 'block';
+      load();
+    });
+
     document.getElementById('reload').addEventListener('click', load);
-    load();
+    document.getElementById('name').focus();
   </script>
 </body>
 </html>
