@@ -411,6 +411,60 @@ const CustomLogo = ({ className, size = 24 }: { className?: string, size?: numbe
   );
 };
 
+/** Custom dropdown — native <select> closes immediately in Electron when App re-renders/focus shifts. */
+function SettingsSelect<T extends string | number>({
+  value,
+  options,
+  onChange,
+  className = 'w-24',
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const label = options.find(o => o.value === value)?.label ?? String(value);
+
+  return (
+    <div className={`relative ${className}`} ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        className="w-full bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 pr-8 text-left focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
+      >
+        {label}
+      </button>
+      <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-full min-w-max bg-theme-bg border border-theme-border rounded-lg shadow-2xl z-[70] overflow-hidden">
+          {options.map(opt => (
+            <button
+              key={String(opt.value)}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-theme-bg-tertiary transition-colors ${opt.value === value ? 'text-theme-accent font-semibold' : 'text-theme-text'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const readStoredArray = <T,>(key: string): T[] => {
   try {
     const value = JSON.parse(localStorage.getItem(key) || '[]');
@@ -697,6 +751,7 @@ export default function App() {
   
   // Settings State
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const settingsModalRef = useRef<HTMLDivElement>(null);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [autoplay, setAutoplay] = useState(() => localStorage.getItem('cinelens_autoplay') === 'true');
   const [repeat, setRepeat] = useState<'off' | 'all' | 'one'>('off');
@@ -764,6 +819,10 @@ export default function App() {
     }
   }, [muteOnStart]);
   useEffect(() => { localStorage.setItem('cinelens_defaultSpeed', defaultSpeed.toString()); }, [defaultSpeed]);
+
+  useEffect(() => {
+    if (showSettingsModal) settingsModalRef.current?.focus();
+  }, [showSettingsModal]);
   useEffect(() => { localStorage.setItem('cinelens_resumePlayback', resumePlayback.toString()); }, [resumePlayback]);
   useEffect(() => { localStorage.setItem('cinelens_theme', theme); }, [theme]);
   useEffect(() => { localStorage.setItem('cinelens_autoHideControls', autoHideControls.toString()); }, [autoHideControls]);
@@ -4377,9 +4436,12 @@ export default function App() {
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') setShowSettingsModal(false); }}
           tabIndex={-1}
-          ref={(el) => el?.focus()}
+          ref={settingsModalRef}
         >
-          <div className="bg-theme-bg-secondary rounded-xl w-full max-w-md border border-theme-border shadow-2xl flex flex-col max-h-[90vh]">
+          <div
+            className="bg-theme-bg-secondary rounded-xl w-full max-w-md border border-theme-border shadow-2xl flex flex-col max-h-[90vh]"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between p-5 border-b border-theme-border shrink-0">
               <h2 className="text-xl font-semibold text-theme-text">{t.settings}</h2>
               <button onClick={() => setShowSettingsModal(false)} className="text-theme-text-muted hover:text-theme-text transition-colors">
@@ -4391,18 +4453,16 @@ export default function App() {
               {/* Språk */}
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-theme-text">{t.language}</h3>
-                <div className="relative w-32">
-                  <select 
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value as 'sv' | 'en' | 'tr')}
-                    className="w-full appearance-none bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
-                  >
-                    <option value="sv" className="bg-theme-bg text-theme-text">Svenska</option>
-                    <option value="en" className="bg-theme-bg text-theme-text">English</option>
-                    <option value="tr" className="bg-theme-bg text-theme-text">Türkçe</option>
-                  </select>
-                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
-                </div>
+                <SettingsSelect
+                  className="w-32"
+                  value={language}
+                  onChange={(v) => setLanguage(v)}
+                  options={[
+                    { value: 'sv' as const, label: 'Svenska' },
+                    { value: 'en' as const, label: 'English' },
+                    { value: 'tr' as const, label: 'Türkçe' },
+                  ]}
+                />
               </div>
 
               {/* Uppspelning */}
@@ -4446,20 +4506,18 @@ export default function App() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-theme-text">{t.defaultSpeed}</span>
-                  <div className="relative w-24">
-                    <select 
-                      value={defaultSpeed}
-                      onChange={(e) => setDefaultSpeed(parseFloat(e.target.value))}
-                      className="w-full appearance-none bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
-                    >
-                      <option value="0.5" className="bg-theme-bg text-theme-text">0.5x</option>
-                      <option value="1" className="bg-theme-bg text-theme-text">1.0x</option>
-                      <option value="1.25" className="bg-theme-bg text-theme-text">1.25x</option>
-                      <option value="1.5" className="bg-theme-bg text-theme-text">1.5x</option>
-                      <option value="2" className="bg-theme-bg text-theme-text">2.0x</option>
-                    </select>
-                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
-                  </div>
+                  <SettingsSelect
+                    className="w-24"
+                    value={defaultSpeed}
+                    onChange={setDefaultSpeed}
+                    options={[
+                      { value: 0.5, label: '0.5x' },
+                      { value: 1, label: '1.0x' },
+                      { value: 1.25, label: '1.25x' },
+                      { value: 1.5, label: '1.5x' },
+                      { value: 2, label: '2.0x' },
+                    ]}
+                  />
                 </div>
               </div>
 
@@ -4480,27 +4538,25 @@ export default function App() {
               {/* IPTV */}
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-theme-text">IPTV</h3>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div>
                     <span className="text-sm text-theme-text">{t.iptvQuality}</span>
                     <p className="text-[11px] text-theme-text-muted mt-0.5">{t.iptvQualityAuto}</p>
                   </div>
-                  <div className="relative w-36">
-                    <select
-                      value={defaultHlsQuality}
-                      onChange={(e) => setDefaultHlsQuality(parseInt(e.target.value))}
-                      className="w-full appearance-none bg-theme-bg border border-theme-border text-theme-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-primary/50 cursor-pointer"
-                    >
-                      <option value={-1} className="bg-theme-bg">Auto ✦</option>
-                      <option value={0} className="bg-theme-bg">144p</option>
-                      <option value={1} className="bg-theme-bg">240p</option>
-                      <option value={2} className="bg-theme-bg">360p</option>
-                      <option value={3} className="bg-theme-bg">480p</option>
-                      <option value={4} className="bg-theme-bg">720p</option>
-                      <option value={5} className="bg-theme-bg">1080p</option>
-                    </select>
-                    <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-theme-text-muted pointer-events-none" />
-                  </div>
+                  <SettingsSelect
+                    className="w-36 shrink-0"
+                    value={defaultHlsQuality}
+                    onChange={setDefaultHlsQuality}
+                    options={[
+                      { value: -1, label: 'Auto ✦' },
+                      { value: 0, label: '144p' },
+                      { value: 1, label: '240p' },
+                      { value: 2, label: '360p' },
+                      { value: 3, label: '480p' },
+                      { value: 4, label: '720p' },
+                      { value: 5, label: '1080p' },
+                    ]}
+                  />
                 </div>
                 <p className="text-[11px] text-theme-text-muted bg-theme-bg-tertiary rounded-lg px-3 py-2">
                   ℹ️ Auto adjusts quality based on your connection speed. Manual selection applies when the stream supports that resolution.

@@ -1,14 +1,13 @@
-# Doggy Player v1.1.68
+# Doggy Player v1.1.69
 
-Fixes 1-second seek freezes on files that look like `.mp4` but are actually MPEG-TS (or other unseekable containers).
+Fixes settings dropdowns that closed immediately so you could not change default speed or IPTV default quality.
 
 ## What's Changed
 
-- **Detect real container format:** Probes files with FFmpeg instead of trusting the file extension.
-- **Auto-remux for smooth seeking:** MPEG-TS and similar containers are stream-copied once to a real MP4 with `faststart` (keeps quality, ~a few seconds for ~1.5GB) and cached for next time.
-- **Example:** `AvratbazAbi14.mp4` was MPEG-TS with an `.mp4` name — Chromium froze ~1s on every seek. After remux it seeks like a normal MP4.
+- **Settings menus stay open:** Replaced fragile native `<select>` controls with custom menus for language, default speed, and IPTV default quality.
+- **Focus trap fixed:** Settings overlay no longer steals focus on every video time update (which closed open dropdowns instantly).
 - **Auto-update for all platforms:** Windows (`latest.yml`), macOS (`latest-mac.yml`) and Linux (`latest-linux.yml`) are published to GitHub Releases.
 
 ## Upgrade
 
-Existing Doggy Player installations will receive v1.1.68 automatically via the built-in updater after the release assets have finished building and publishing.
+Existing Doggy Player installations will receive v1.1.69 automatically via the built-in updater after the release assets have finished building and publishing.
