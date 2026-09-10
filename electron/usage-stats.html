@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline';" />
+  <title>Doggy Player</title>
+  <style>
+    :root {
+      --bg: #000;
+      --card: #171717;
+      --muted: #a3a3a3;
+      --text: #fff;
+      --accent: #9E5B1A;
+      --bar: #7A4614;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Segoe UI, system-ui, sans-serif;
+    }
+    body { padding: 22px; }
+    h1 {
+      font-size: 15px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin: 0 0 4px;
+      color: var(--accent);
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 20px;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .card.wide { grid-column: 1 / -1; }
+    .label {
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
+    .chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      height: 180px;
+      padding: 12px 8px 0;
+      background: var(--card);
+      border-radius: 12px;
+    }
+    .col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    .bar {
+      width: 100%;
+      max-width: 14px;
+      border-radius: 3px 3px 0 0;
+      background: var(--bar);
+      min-height: 2px;
+    }
+    .col.today .bar { background: var(--accent); }
+    .tick {
+      margin-top: 6px;
+      font-size: 9px;
+      color: var(--muted);
+      transform: rotate(-55deg);
+      transform-origin: top center;
+      height: 28px;
+      white-space: nowrap;
+    }
+    .status {
+      margin-top: 16px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .error { color: #f87171; }
+    button {
+      margin-top: 14px;
+      background: var(--bar);
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>Dagliga användare</h1>
+  <p class="sub">Anonyma öppningar · en ping per dator och dag · UTC</p>
+  <div class="cards">
+    <div class="card">
+      <div class="label">Idag</div>
+      <div class="value" id="today">–</div>
+    </div>
+    <div class="card">
+      <div class="label">Igår</div>
+      <div class="value" id="yesterday">–</div>
+    </div>
+    <div class="card">
+      <div class="label">7 dagar</div>
+      <div class="value" id="last7">–</div>
+    </div>
+    <div class="card">
+      <div class="label">30 dagar</div>
+      <div class="value" id="last30">–</div>
+    </div>
+  </div>
+  <div class="chart" id="chart"></div>
+  <p class="hint">Siffran är unika installationer som öppnat Doggy Player den dagen, inte visningar.</p>
+  <div class="status" id="status">Hämtar…</div>
+  <button id="reload">Uppdatera</button>
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    function fmtDay(date) {
+      return date.slice(5).replace('-', '/');
+    }
+
+    async function load() {
+      const status = document.getElementById('status');
+      status.className = 'status';
+      status.textContent = 'Hämtar…';
+      try {
+        const data = await ipcRenderer.invoke('creator-stats:load');
+        if (data.offline) {
+          status.className = 'status error';
+          status.textContent = 'Kunde inte nå räknaren. Kontrollera internet och försök igen.';
+          return;
+        }
+        document.getElementById('today').textContent = data.today;
+        document.getElementById('yesterday').textContent = data.yesterday;
+        document.getElementById('last7').textContent = data.last7;
+        document.getElementById('last30').textContent = data.last30;
+
+        const max = Math.max(1, ...data.rows.map((row) => row.count));
+        const chart = document.getElementById('chart');
+        chart.innerHTML = data.rows.map((row, i) => {
+          const h = Math.round((row.count / max) * 140);
+          const isToday = i === data.rows.length - 1;
+          const showTick = i % 3 === 0 || isToday;
+          return `<div class="col${isToday ? ' today' : ''}" title="${row.date}: ${row.count}">
+            <div class="bar" style="height:${h}px"></div>
+            <div class="tick">${showTick ? fmtDay(row.date) : ''}</div>
+          </div>`;
+        }).join('');
+
+        const when = new Date(data.generatedAt).toLocaleString('sv-SE');
+        status.textContent = 'Uppdaterad ' + when;
+      } catch (err) {
+        status.className = 'status error';
+        status.textContent = 'Kunde inte läsa statistiken.';
+      }
+    }
+
+    document.getElementById('reload').addEventListener('click', load);
+    load();
+  </script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { initUsageTelemetry, unregisterUsageTelemetry } from './telemetry.js';
 import os from 'os';
 import pkg from 'electron-updater';
 const { autoUpdater } = pkg;
@@ -174,6 +175,8 @@ if (!gotTheLock) {
         createWindow();
       }
     });
+
+    initUsageTelemetry();
 
     // Auto-updater (only in packaged app)
     if (app.isPackaged) {
@@ -593,4 +596,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('will-quit', () => {
+  unregisterUsageTelemetry();
 });
