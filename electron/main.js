@@ -83,6 +83,164 @@ function remuxCachePath(cleanPath) {
 }
 
 /**
+ * Chromium has to decode from the previous IDR to show a seeked frame, so seek
+ * latency scales with GOP length: measured p50 of 217ms at an 8.3s GOP versus
+ * 30ms at a 1s GOP on identical file size. Re-encoding with a dense keyframe
+ * interval is the only way to get YouTube/VLC-class seeking out of a long-GOP
+ * source. Lossy, so this is opt-in and cached.
+ */
+function seekOptCachePath(cleanPath) {
+  let stat;
+  try { stat = fs.statSync(cleanPath); } catch { return null; }
+  const key = `seekopt-v1|${cleanPath}|${stat.size}|${stat.mtimeMs}`;
+  const hash = crypto.createHash('sha1').update(key).digest('hex').slice(0, 24);
+  const dir = path.join(app.getPath('userData'), 'seek-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${hash}.mp4`);
+}
+
+/** How often keyframes appear, in seconds. null when it cannot be determined. */
+function probeKeyframeInterval(videoPath) {
+  return new Promise((resolve) => {
+    // -skip_frame nokey + showinfo keeps this cheap: only keyframes are decoded
+    // and -t caps the window, so even a 40GB file answers in well under a second.
+    const args = [
+      '-hide_banner', '-loglevel', 'info',
+      '-skip_frame', 'nokey',
+      '-t', '120', '-i', videoPath,
+      '-an', '-vf', 'showinfo',
+      '-f', 'null', '-'
+    ];
+    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    let err = '';
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch (_) {}
+      resolve(null);
+    }, 20000);
+    proc.stderr.on('data', (d) => { if (err.length < 400000) err += d.toString(); });
+    proc.on('error', () => { clearTimeout(timer); resolve(null); });
+    proc.on('close', () => {
+      clearTimeout(timer);
+      const pts = [...err.matchAll(/pts_time:\s*([0-9.]+)/g)].map(m => parseFloat(m[1]));
+      if (pts.length < 2) return resolve(null);
+      const gaps = [];
+      for (let i = 1; i < pts.length; i++) {
+        const g = pts[i] - pts[i - 1];
+        if (g > 0.01 && g < 30) gaps.push(g);
+      }
+      if (!gaps.length) return resolve(null);
+      gaps.sort((a, b) => a - b);
+      // Median is robust against one odd interval in the sample.
+      const median = gaps[Math.floor(gaps.length / 2)];
+      resolve(Math.round(median * 100) / 100);
+    });
+  });
+}
+
+function optimizeForSeeking(cleanPath, opts = {}) {
+  const gopSec = Math.min(10, Math.max(0.5, Number(opts.gopSeconds) || 1));
+  const crf = Number.isFinite(Number(opts.crf)) ? Number(opts.crf) : 20;
+  const preset = opts.preset || 'veryfast';
+
+  return new Promise((resolve, reject) => {
+    const outPath = seekOptCachePath(cleanPath);
+    if (!outPath) return reject(new Error('Cannot optimize: missing file'));
+    if (validCachedFile(outPath)) {
+      console.log(`[SeekOpt] Cache hit: ${outPath}`);
+      return resolve(outPath);
+    }
+    // A killed encode must never be mistaken for a finished one: write to a
+    // sidecar and rename only once ffmpeg exits cleanly.
+    const partPath = `${outPath}.part`;
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
+    try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+
+    let source = cleanPath;
+    let tmpPath = null;
+    if (opts.remuxFirst) {
+      // Normalise the container first so the encoder sees a clean MP4 stream.
+      tmpPath = remuxCachePath(cleanPath);
+      if (tmpPath && !fs.existsSync(tmpPath)) {
+        return reject(new Error('Container not normalised yet'));
+      }
+      if (tmpPath) source = tmpPath;
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('seek-optimize-progress', { phase: 'start' });
+    }
+    console.log(`[SeekOpt] ${cleanPath} -> dense keyframes every ${gopSec}s (crf ${crf}, ${preset})`);
+
+    const gopFrames = Math.max(1, Math.round(gopSec * 30));
+    const args = [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      '-i', source,
+      '-c:v', 'libx264', '-preset', preset, '-crf', String(crf),
+      '-g', String(gopFrames), '-keyint_min', String(gopFrames),
+      '-sc_threshold', '0', '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-c:a', 'aac', '-b:a', '160k',
+      '-progress', 'pipe:1', '-nostats',
+      // The .part suffix hides the container from ffmpeg's format guesser.
+      '-f', 'mp4',
+      partPath
+    ];
+    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    activeOptimizeProc = proc;
+    let errBuf = '';
+    let lastPct = -1;
+    proc.stdout.on('data', (d) => {
+      const txt = d.toString();
+      const m = /out_time_ms=(\d+)/.exec(txt);
+      if (!m) return;
+      const doneMs = Math.max(0, Math.round(parseInt(m[1], 10) / 1000));
+      const pct = durationHint > 0 ? Math.min(99, Math.round((doneMs / (durationHint * 1000)) * 100)) : -1;
+      if (pct !== lastPct && pct >= 0 && mainWindow && !mainWindow.isDestroyed()) {
+        lastPct = pct;
+        mainWindow.webContents.send('seek-optimize-progress', { phase: 'progress', percent: pct });
+      }
+    });
+    proc.stderr.on('data', (d) => { if (errBuf.length < 8000) errBuf += d.toString(); });
+    proc.on('error', (err) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('seek-optimize-progress', { phase: 'error' });
+      }
+      reject(err);
+    });
+    proc.on('close', (code) => {
+      if (activeOptimizeProc === proc) activeOptimizeProc = null;
+      const ok = code === 0 && fs.existsSync(partPath) && fs.statSync(partPath).size > 1024;
+      if (ok) {
+        try {
+          fs.renameSync(partPath, outPath);
+        } catch (err) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('seek-optimize-progress', { phase: 'error' });
+          }
+          return reject(err);
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('seek-optimize-progress', { phase: 'done' });
+        }
+        console.log(`[SeekOpt] Done: ${outPath}`);
+        resolve(outPath);
+      } else {
+        try { if (fs.existsSync(partPath)) fs.unlinkSync(partPath); } catch (_) {}
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('seek-optimize-progress', { phase: 'error' });
+        }
+        reject(new Error(errBuf || `Seek optimization failed with code ${code}`));
+      }
+    });
+  });
+}
+
+/** Duration probe cached per file so the progress bar has a denominator. */
+let durationHint = 0;
+void durationHint;
+
+
+/**
  * Remux unseekable containers (e.g. MPEG-TS saved as .mp4) to real MP4 + faststart.
  * Stream-copy only — ~4s for a 1.5GB file on SSD. Result is cached.
  */
@@ -514,6 +672,7 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
   }
 
   const duration = await getVideoDuration(cleanPath);
+  durationHint = duration;
   let fileSize = 0;
   try { fileSize = fs.statSync(cleanPath).size; } catch (_) {}
 
@@ -543,8 +702,84 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
   };
 });
 
-/** Fast JPEG frame at timestamp for scrub preview (does not touch the <video> decoder). */
-ipcMain.handle('extract-seek-frame', async (event, filePath, timeSec) => {
+/** Abort an in-progress seek optimization. The partial file is discarded. */
+ipcMain.handle('cancel-seek-optimize', async () => {
+  const proc = activeOptimizeProc;
+  activeOptimizeProc = null;
+  if (proc) {
+    try { proc.kill('SIGKILL'); } catch (_) {}
+    return true;
+  }
+  return false;
+});
+
+/**
+ * Report how far apart keyframes are so the UI can tell whether the file is
+ * worth optimizing. >2s means every seek pays a multi-hundred-ms decode.
+ */ipcMain.handle('probe-seek-quality', async (event, filePath) => {
+  const cleanPath = resolveLocalMediaPath(filePath);
+  if (!cleanPath || !fs.existsSync(cleanPath)) return null;
+  const gopSeconds = await probeKeyframeInterval(cleanPath);
+  const duration = await getVideoDuration(cleanPath);
+  let size = 0;
+  try { size = fs.statSync(cleanPath).size; } catch (_) {}
+  return { gopSeconds, duration, size, optimizeCached: validCachedFile(seekOptCachePath(cleanPath)) };
+});
+
+/** A cached file only counts if it actually decodes — partial encodes must not
+ *  be served as cache hits. Probing duration is the cheapest real validation. */
+function validCachedFile(p) {
+  try {
+    if (!fs.existsSync(p)) return false;
+    if (fs.statSync(p).size <= 1024) return false;
+  } catch (_) {
+    return false;
+  }
+  return true;
+}
+
+let activeOptimize = null;
+let activeOptimizeProc = null;
+
+/** Re-encode with a dense keyframe interval so seeking is near-instant. Cached. */
+ipcMain.handle('optimize-for-seeking', async (event, filePath, opts = {}) => {
+  const cleanPath = resolveLocalMediaPath(filePath);
+  if (!cleanPath || !fs.existsSync(cleanPath)) throw new Error('File not found');
+  if (activeOptimize) return activeOptimize;
+
+  activeOptimize = (async () => {
+    let remuxFirst = false;
+    const format = await probeInputFormat(cleanPath);
+    if (format && UNSEEKABLE_FORMATS.has(format)) {
+      try {
+        await ensureSeekableRemux(cleanPath, format);
+        remuxFirst = true;
+      } catch (err) {
+        console.error('[SeekOpt] Remux failed, encoding from source:', err.message);
+      }
+    }
+
+    durationHint = await getVideoDuration(cleanPath);
+    const outPath = await optimizeForSeeking(cleanPath, { ...opts, remuxFirst });
+    let duration = await getVideoDuration(outPath);
+    if (!(duration > 0)) {
+      // Corrupt or unreadable output — drop it so the next run re-encodes.
+      try { fs.unlinkSync(outPath); } catch (_) {}
+      throw new Error('Optimized file is not readable');
+    }
+    let size = 0;
+    try { size = fs.statSync(outPath).size; } catch (_) {}
+    return { path: outPath, url: pathToFileURL(outPath).href, duration, size };
+  })();
+
+  try {
+    return await activeOptimize;
+  } finally {
+    activeOptimize = null;
+  }
+});
+
+/** Fast JPEG frame at timestamp for scrub preview (does not touch the <video> decoder). */ipcMain.handle('extract-seek-frame', async (event, filePath, timeSec) => {
   const cleanPath = resolveLocalMediaPath(filePath);
   if (!cleanPath || !fs.existsSync(cleanPath)) return null;
 

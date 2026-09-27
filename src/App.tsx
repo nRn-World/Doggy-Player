@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ContextMenu } from './ContextMenu';
-import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload, Camera, SlidersHorizontal, Tv2, Activity, FolderPlus, FolderEdit, FolderMinus, FolderOpen, MoreVertical, Edit3, Lock, Unlock } from 'lucide-react';
+import { Play, Pause, Square, SkipBack, SkipForward, Volume2, VolumeX, Maximize, FileVideo, X, Film, ListVideo, Trash2, Settings, ChevronDown, Copy, Check, Repeat, Repeat1, Shuffle, Monitor, LogOut, Search, Grid, Heart, Key, Captions, Upload, Camera, SlidersHorizontal, Tv2, Activity, FolderPlus, FolderEdit, FolderMinus, FolderOpen, MoreVertical, Edit3, Lock, Unlock, Zap } from 'lucide-react';
 import Hls from 'hls.js';
 
 const translations = {
@@ -565,6 +565,15 @@ export default function App() {
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [realVideoUrl, setRealVideoUrl] = useState<string | null>(null);
   const [isRemuxing, setIsRemuxing] = useState(false);
+  /** Long-GOP files make every seek pay a decode-forward. Opt-in fix. */
+  const [seekQuality, setSeekQuality] = useState<{ gopSeconds: number | null; duration: number; size: number; optimizeCached: boolean } | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizePercent, setOptimizePercent] = useState(0);
+  const [optimized, setOptimized] = useState<{ srcKey: string; url: string; localPath: string; duration: number; size: number } | null>(null);
+  const optimizedPathRef = useRef<string | null>(null);
+  const pendingRestoreRef = useRef<number | null>(null);
+  const optimizeCancelledRef = useRef(false);
+  const [autoSeekOpt, setAutoSeekOpt] = useState(() => localStorage.getItem('cinelens_autoSeekOpt') !== 'false');
 
   // Function to determine if a URL should be handled by hls.js
   const isHlsStream = (url: string) => {
@@ -643,6 +652,18 @@ export default function App() {
 
       // Check if it's a local file path (handles raw paths and file:// URLs)
       const isLocalPath = videoSrc.startsWith('/') || videoSrc.includes(':\\') || videoSrc.startsWith('file:');
+
+      // A seek-optimized copy already exists for this file — play that instead.
+      if (optimized && optimized.srcKey === videoSrc) {
+        streamSeekOffsetRef.current = 0;
+        streamDurationRef.current = optimized.duration;
+        localMediaPathRef.current = optimized.localPath;
+        mediaFileSizeRef.current = optimized.size || 0;
+        setRealVideoUrl(optimized.url);
+        if (optimized.duration > 0) setDuration(optimized.duration);
+        return;
+      }
+
       if (isLocalPath && (window as any).require) {
         try {
           const { ipcRenderer } = (window as any).require('electron');
@@ -686,7 +707,7 @@ export default function App() {
         hlsRef.current = null;
       }
     };
-  }, [videoSrc, isTranscoding]);
+  }, [videoSrc, isTranscoding, optimized]);
 
   // Separate effect to actually set the src to avoid re-triggering HLS logic unnecessarily
   useEffect(() => {
@@ -704,11 +725,95 @@ export default function App() {
     setIsRemuxing(false);
   }, [videoSrc]);
 
+  // Report how far apart keyframes are. Long GOPs are the reason seeks stutter.
+  useEffect(() => {
+    setSeekQuality(null);
+    const mediaPath = localMediaPathRef.current;
+    if (!mediaPath || !realVideoUrl || isHlsStream(videoSrc || '')) return;
+    if (realVideoUrl.includes('&transcode=true')) return;
+    if (!(window as any).require) return;
+    const { ipcRenderer } = (window as any).require('electron');
+    let cancelled = false;
+    ipcRenderer.invoke('probe-seek-quality', mediaPath)
+      .then((res: any) => { if (!cancelled && res) setSeekQuality(res); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [realVideoUrl, videoSrc]);
+
+  // Progress from the ffmpeg re-encode in the main process.
+  useEffect(() => {
+    if (!(window as any).require) return;
+    const { ipcRenderer } = (window as any).require('electron');
+    const onProgress = (_e: any, payload: any) => {
+      if (!payload) return;
+      if (payload.phase === 'start') setOptimizePercent(0);
+      else if (payload.phase === 'progress') setOptimizePercent(payload.percent || 0);
+    };
+    ipcRenderer.on('seek-optimize-progress', onProgress);
+    return () => { ipcRenderer.removeListener('seek-optimize-progress', onProgress); };
+  }, []);
+
+  const runSeekOptimization = async () => {
+    const mediaPath = localMediaPathRef.current;
+    if (!mediaPath || !videoSrc || !(window as any).require) return;
+    if (isOptimizing) return;
+    const resumeAt = videoRef.current?.currentTime || 0;
+    const wasPlaying = videoRef.current ? !videoRef.current.paused : false;
+    optimizeCancelledRef.current = false;
+    setIsOptimizing(true);
+    setOptimizePercent(0);
+    try {
+      const { ipcRenderer } = (window as any).require('electron');
+      const res = await ipcRenderer.invoke('optimize-for-seeking', mediaPath, { gopSeconds: 1, crf: 20, preset: 'veryfast' });
+      if (optimizeCancelledRef.current) return;
+      if (res?.url) {
+        optimizedPathRef.current = res.path;
+        pendingRestoreRef.current = resumeAt;
+        setOptimized({ srcKey: videoSrc, url: res.url, localPath: res.path, duration: res.duration, size: res.size });
+        setSeekQuality((q) => (q ? { ...q, gopSeconds: 1, optimizeCached: true } : q));
+        if (wasPlaying) setIsPlaying(true);
+      }
+    } catch (err: any) {
+      if (!optimizeCancelledRef.current) console.error('[SeekOpt] Failed:', err?.message || err);
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const cancelSeekOptimization = async () => {
+    optimizeCancelledRef.current = true;
+    setIsOptimizing(false);
+    try {
+      if ((window as any).require) {
+        const { ipcRenderer } = (window as any).require('electron');
+        await ipcRenderer.invoke('cancel-seek-optimize').catch(() => {});
+      }
+    } catch { /* ignore */ }
+  };
+
+  // Long-GOP files can never seek smoothly — start the one-time keyframe
+  // optimization in the background shortly after playback begins. Cached, so
+  // it only ever runs once per file. Cancel stops it and disables auto-start.
+  useEffect(() => {
+    if (!autoSeekOpt || isOptimizing || optimizeCancelledRef.current) return;
+    if (!seekQuality || seekQuality.gopSeconds === null || seekQuality.gopSeconds <= 2) return;
+    if (seekQuality.optimizeCached || optimized) return;
+    if (!localMediaPathRef.current || !(window as any).require) return;
+    const t = setTimeout(() => { runSeekOptimization(); }, 2500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekQuality, autoSeekOpt]);
+
   // Handle play/pause sync
   useEffect(() => {
     if (!videoRef.current || !videoSrc) return;
-    
+
+    // Idempotent: only act when the element disagrees with the state. Without
+    // the paused-checks, the onPlay that follows a seek-resume flips
+    // isPlaying and fires a second play() straight into the settling seek —
+    // which restarts the pipeline mid-seek and doubles audio+video.
     if (isPlaying) {
+      if (!videoRef.current.paused) return;
       // For standard files, handle play normally
       if (!isHlsStream(videoSrc)) {
         const playPromise = videoRef.current.play();
@@ -722,7 +827,7 @@ export default function App() {
         // For streams, ensure play
         videoRef.current.play().catch(() => {});
       }
-    } else {
+    } else if (!videoRef.current.paused) {
       videoRef.current.pause();
     }
   }, [isPlaying, videoSrc]);
@@ -735,7 +840,6 @@ export default function App() {
   const mediaFileSizeRef = useRef<number>(0);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
-  const previewVideoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(() => {
     if (localStorage.getItem('cinelens_rememberVolume') === 'true') {
       return parseFloat(localStorage.getItem('cinelens_savedVolume') || '1');
@@ -1695,8 +1799,21 @@ export default function App() {
     });
     if (videoFiles.length === 0) return;
 
+    // `File.path` was removed in Electron 32, so without webUtils every local
+    // file silently became a blob: URL — which bypasses the remux, the format
+    // probe, the file:// fast path and all thumbnail extraction.
+    const resolveLocalPath = (file: File): string | null => {
+      const legacy = (file as any).path;
+      if (legacy) return legacy;
+      try {
+        const electron = (window as any).require('electron');
+        if (electron?.webUtils?.getPathForFile) return electron.webUtils.getPathForFile(file) || null;
+      } catch { /* not Electron, or API unavailable */ }
+      return null;
+    };
+
     const newItems = videoFiles.map(file => {
-      const localPath = (file as any).path;
+      const localPath = resolveLocalPath(file);
       const url = localPath || URL.createObjectURL(file);
       if (!localPath) blobUrlsRef.current.add(url);
       return {
@@ -2174,11 +2291,21 @@ export default function App() {
   const holdSeekDeltaRef = useRef<number>(0);
   const holdSeekTargetRef = useRef<number | null>(null);
   const queuedSeekTargetRef = useRef<number | null>(null);
+  const issuedSeekTargetRef = useRef<number | null>(null);
   const seekInFlightRef = useRef(false);
+  const seekWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isScrubbingRef = useRef(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const scrubTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastScrubSeekRef = useRef(0);
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewTimeRef = useRef(0);
+  const previewReqRef = useRef(0);
+  const [previewFrame, setPreviewFrame] = useState<string | null>(null);
+
+  /** Pause between scrub preview seeks so one seek can land before the next. */
+  const SCRUB_SEEK_INTERVAL_MS = 130;
 
   const isTranscodedStream = () =>
     !!(realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true'));
@@ -2222,11 +2349,19 @@ export default function App() {
     }
 
     const v = videoRef.current;
-    seekInFlightRef.current = true;
-    isSeekingRef.current = true;
-    setIsSeeking(true);
     wasPlayingBeforeSeekRef.current = !v.paused || wasPlayingBeforeSeekRef.current || isPlaying;
 
+    // Already parked on this frame — re-seeking would only cost a decoder flush.
+    if (v.readyState >= 2 && Math.abs(v.currentTime - target) < 0.03) {
+      seekInFlightRef.current = false;
+      isSeekingRef.current = false;
+      setIsSeeking(false);
+      resumeAfterSeek();
+      return;
+    }
+
+    markSeekInFlight();
+    issuedSeekTargetRef.current = target;
     try {
       // Prefer precise currentTime — keeps A/V in sync after seek
       v.currentTime = target;
@@ -2238,35 +2373,73 @@ export default function App() {
     }
   };
 
+  /**
+   * Lock the controller for one seek round. The watchdog guarantees the lock is
+   * always released again: without it a `seeking` event that never gets its
+   * `seeked` partner leaves the controller locked forever, and from then on
+   * every seek is swallowed into the queue — the picture stops following the
+   * playhead, which is exactly the "lagging while seeking" symptom.
+   */
+  const markSeekInFlight = () => {
+    seekInFlightRef.current = true;
+    isSeekingRef.current = true;
+    setIsSeeking(true);
+    clearSeekWatchdog();
+    seekWatchdogRef.current = setTimeout(() => {
+      seekWatchdogRef.current = null;
+      finishSeekCycle();
+    }, 1500);
+  };
+
+  const clearSeekWatchdog = () => {
+    if (seekWatchdogRef.current) {
+      clearTimeout(seekWatchdogRef.current);
+      seekWatchdogRef.current = null;
+    }
+  };
+
+  /** Keep playing across a seek, but never start playback the user paused. */
+  const resumeAfterSeek = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    // Mid-drag the player is deliberately parked on the cursor position.
+    if (isScrubbingRef.current) return;
+    const shouldPlay = wasPlayingBeforeSeekRef.current || (!v.paused && isPlaying);
+    wasPlayingBeforeSeekRef.current = false;
+    if (shouldPlay && v.paused) v.play().catch(() => {});
+  };
+
   const finishSeekCycle = () => {
-    if (queuedSeekTargetRef.current !== null) {
-      const next = queuedSeekTargetRef.current;
+    clearSeekWatchdog();
+    seekInFlightRef.current = false;
+
+    // Last-wins: if the playhead moved again while this seek was in flight,
+    // jump straight to the newest target instead of settling on the stale one.
+    // But if the queued target is just the echo of the seek that landed
+    // (release re-applying the preview position), drop it — re-seeking the
+    // same frame costs a full decode and a play/seek overlap for nothing.
+    const next = queuedSeekTargetRef.current;
+    if (next !== null) {
       queuedSeekTargetRef.current = null;
-      seekInFlightRef.current = false;
-      const cur = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
-      if (Math.abs(next - cur) > 0.15) {
-        applyMediaSeek(next);
-        return;
+      const issued = issuedSeekTargetRef.current;
+      if (issued !== null && Math.abs(next - issued) < 0.05) {
+        issuedSeekTargetRef.current = null;
+      } else {
+        const cur = streamSeekOffsetRef.current + (videoRef.current?.currentTime || 0);
+        if (Math.abs(next - cur) > 0.03) {
+          applyMediaSeek(next);
+          return;
+        }
       }
     }
 
-    seekInFlightRef.current = false;
     isSeekingRef.current = false;
     setIsSeeking(false);
 
     const raw = videoRef.current?.currentTime || 0;
     setCurrentTime(streamSeekOffsetRef.current + raw);
 
-    // Always resume playback after seek if we were playing — never leave video "stuck" paused
-    if (
-      (wasPlayingBeforeSeekRef.current || isPlaying) &&
-      !isScrubbingRef.current &&
-      holdSeekIntervalRef.current === null &&
-      videoRef.current
-    ) {
-      wasPlayingBeforeSeekRef.current = false;
-      videoRef.current.play().catch(() => {});
-    }
+    resumeAfterSeek();
   };
 
   const flushPendingSeek = () => {
@@ -2300,17 +2473,14 @@ export default function App() {
     setCurrentTime(holdSeekTargetRef.current);
     applyMediaSeek(holdSeekTargetRef.current);
 
-    // Update UI often; queue media seeks (last-wins) so we don't stack decoder work
+    // Update UI often; queue media seeks (last-wins) so we don't stack decoder work.
+    // 400ms gives a large-file seek time to land before the next one is requested.
     holdSeekIntervalRef.current = setInterval(() => {
       if (holdSeekTargetRef.current === null) return;
       holdSeekTargetRef.current = clampSeekTime(holdSeekTargetRef.current + holdSeekDeltaRef.current);
       setCurrentTime(holdSeekTargetRef.current);
-      if (seekInFlightRef.current) {
-        queuedSeekTargetRef.current = holdSeekTargetRef.current;
-      } else {
-        applyMediaSeek(holdSeekTargetRef.current);
-      }
-    }, 200);
+      applyMediaSeek(holdSeekTargetRef.current);
+    }, 400);
   };
 
   const stopHoldSeek = () => {
@@ -2358,15 +2528,19 @@ export default function App() {
       if (holdSeekIntervalRef.current) clearInterval(holdSeekIntervalRef.current);
       if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
       if (previewSeekTimerRef.current) clearTimeout(previewSeekTimerRef.current);
+      if (seekWatchdogRef.current) clearTimeout(seekWatchdogRef.current);
+      if (scrubTimerRef.current) clearInterval(scrubTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
     isSeekingRef.current = false;
     seekInFlightRef.current = false;
+    if (seekWatchdogRef.current) { clearTimeout(seekWatchdogRef.current); seekWatchdogRef.current = null; }
     queuedSeekTargetRef.current = null;
+    issuedSeekTargetRef.current = null;
     holdSeekTargetRef.current = null;
-    isScrubbingRef.current = false;
+    endTimelineScrub();
     wasPlayingBeforeSeekRef.current = false;
     setIsSeeking(false);
     localMediaPathRef.current = null;
@@ -2379,6 +2553,37 @@ export default function App() {
     holdSeekDeltaRef.current = 0;
     if (transcodeSeekTimerRef.current) { clearTimeout(transcodeSeekTimerRef.current); transcodeSeekTimerRef.current = null; }
   }, [videoSrc]);
+
+  // Drive the playhead from decoded frames instead of `timeupdate` (~4Hz), so
+  // the progress bar glides instead of stepping.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    let handle = 0;
+    let cancelled = false;
+    const anyV = v as any;
+
+    const onFrame = () => {
+      if (cancelled) return;
+      if (!isSeekingRef.current && !isScrubbingRef.current && holdSeekIntervalRef.current === null) {
+        setCurrentTime(streamSeekOffsetRef.current + v.currentTime);
+      }
+      if (typeof anyV.requestVideoFrameCallback === 'function') {
+        handle = anyV.requestVideoFrameCallback(onFrame);
+      }
+    };
+
+    if (typeof anyV.requestVideoFrameCallback === 'function') {
+      handle = anyV.requestVideoFrameCallback(onFrame);
+    }
+
+    return () => {
+      cancelled = true;
+      if (handle && typeof anyV.cancelVideoFrameCallback === 'function') {
+        anyV.cancelVideoFrameCallback(handle);
+      }
+    };
+  }, [videoSrc, realVideoUrl]);
 
   // Keyboard Shortcuts (VLC style)
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -2806,37 +3011,77 @@ export default function App() {
   };
 
   const beginTimelineScrub = () => {
+    if (isScrubbingRef.current) return;
     isScrubbingRef.current = true;
-    if (videoRef.current && !videoRef.current.paused) {
+    setIsScrubbing(true);
+    lastScrubSeekRef.current = 0;
+
+    const v = videoRef.current;
+    if (v && !v.paused) {
       wasPlayingBeforeSeekRef.current = true;
-      try { videoRef.current.pause(); } catch { /* ignore */ }
+      try { v.pause(); } catch { /* ignore */ }
+    }
+
+    // Park the picture on the cursor while dragging. The player is paused here,
+    // so a seek every ~130ms costs no playback smoothness and the video tracks
+    // the pointer instead of only jumping once on release.
+    scrubTimerRef.current = setInterval(() => {
+      if (!isScrubbingRef.current) return;
+      const target = timelineSeekRef.current;
+      if (target === null) return;
+      const now = performance.now();
+      if (now - lastScrubSeekRef.current < SCRUB_SEEK_INTERVAL_MS) return;
+      lastScrubSeekRef.current = now;
+      applyMediaSeek(target);
+    }, SCRUB_SEEK_INTERVAL_MS);
+  };
+
+  const endTimelineScrub = () => {
+    isScrubbingRef.current = false;
+    setIsScrubbing(false);
+    if (scrubTimerRef.current) {
+      clearInterval(scrubTimerRef.current);
+      scrubTimerRef.current = null;
     }
   };
 
   const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
     if (!isScrubbingRef.current) beginTimelineScrub();
+
     if (isTranscodedStream()) {
-      seekTranscoded(time);
-    } else {
-      scheduleTimelineSeek(time);
+      // A transcoded pipe can only be repositioned by starting a new ffmpeg
+      // process, so debounce hard here or a drag spawns one process per pixel.
+      scheduleTimelineSeek(time, { immediate: false });
+      return;
     }
+
+    setCurrentTime(time);
+    timelineSeekRef.current = time;
+    // Leading seek so the picture reacts immediately; the interval keeps up.
+    pushScrubSeek();
+  };
+
+  const pushScrubSeek = () => {
+    if (!isScrubbingRef.current || timelineSeekRef.current === null) return;
+    const now = performance.now();
+    if (now - lastScrubSeekRef.current < SCRUB_SEEK_INTERVAL_MS) return;
+    lastScrubSeekRef.current = now;
+    applyMediaSeek(timelineSeekRef.current);
   };
 
   const handleTimelineCommit = () => {
-    isScrubbingRef.current = false;
+    endTimelineScrub();
     if (timelineSeekTimerRef.current) {
       clearTimeout(timelineSeekTimerRef.current);
       timelineSeekTimerRef.current = null;
     }
+    // Land exactly where the pointer was released.
     if (timelineSeekRef.current !== null) {
-      const t = timelineSeekRef.current;
-      timelineSeekRef.current = null;
-      applyMediaSeek(t);
-    } else if ((wasPlayingBeforeSeekRef.current || isPlaying) && videoRef.current?.paused) {
-      wasPlayingBeforeSeekRef.current = false;
-      videoRef.current.play().catch(() => {});
+      flushTimelineSeek();
+      return;
     }
+    resumeAfterSeek();
   };
 
   const handleTimelineMouseMove = (e: React.MouseEvent<HTMLInputElement>) => {
@@ -2845,24 +3090,33 @@ export default function App() {
     const x = e.clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, x / rect.width));
     const time = percentage * duration;
-    
+
     setHoverTime(time);
     setHoverPosition(x);
 
-    // Throttle preview seeks so they don't contend with the main decoder on large files
-    if (!previewVideoRef.current) return;
+    // Thumbnail only — never seek the main <video> for the hover preview, that
+    // is what used to make scrubbing feel heavy.
+    const mediaPath = localMediaPathRef.current;
+    if (!mediaPath || !(window as any).require) return;
     previewTimeRef.current = time;
     if (previewSeekTimerRef.current) return;
     previewSeekTimerRef.current = setTimeout(() => {
       previewSeekTimerRef.current = null;
-      try {
-        if (previewVideoRef.current) previewVideoRef.current.currentTime = previewTimeRef.current;
-      } catch { /* ignore */ }
-    }, 100);
+      const req = ++previewReqRef.current;
+      const { ipcRenderer } = (window as any).require('electron');
+      ipcRenderer.invoke('extract-seek-frame', mediaPath, previewTimeRef.current)
+        .then((frame: string | null) => {
+          if (req !== previewReqRef.current) return;
+          setPreviewFrame(frame);
+        })
+        .catch(() => {});
+    }, 120);
   };
 
   const handleTimelineMouseLeave = () => {
     setHoverTime(null);
+    previewReqRef.current++;
+    setPreviewFrame(null);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3151,14 +3405,28 @@ export default function App() {
               style={transformStyle}
               onCanPlay={() => {
                 setIsVideoLoading(false);
+                // A seek is only ever finished by `seeked` (or the watchdog).
+                // `canplay` arrives while the decoder is still settling the
+                // seek — releasing the lock or calling play() here lets a new
+                // seek pile on and restarts playback from a half-seeked
+                // position, which is heard/seen as the video doubling.
+                if (seekInFlightRef.current || isScrubbingRef.current) return;
                 setIsSeeking(false);
                 isSeekingRef.current = false;
-                seekInFlightRef.current = false;
-                if (isPlaying || wasPlayingBeforeSeekRef.current) {
-                  videoRef.current?.play().catch(() => {});
+                if ((isPlaying || wasPlayingBeforeSeekRef.current) && videoRef.current && videoRef.current.paused) {
+                  wasPlayingBeforeSeekRef.current = false;
+                  videoRef.current.play().catch(() => {});
                 }
               }}
-              onPlaying={() => { setIsVideoLoading(false); setIsSeeking(false); isSeekingRef.current = false; seekInFlightRef.current = false; }}
+              onPlaying={() => {
+                setIsVideoLoading(false);
+                // Never release the seek lock on `playing` — it is owned by the
+                // seek controller until `seeked`. Clearing it early is what let
+                // overlapping seeks stack up.
+                if (seekInFlightRef.current || isScrubbingRef.current) return;
+                setIsSeeking(false);
+                isSeekingRef.current = false;
+              }}
               onWaiting={() => {
                 const isTranscoded = realVideoUrl?.includes('&transcode=true');
                 // For large local files (non-transcoded), show subtle seeking state instead of full IPTV overlay
@@ -3171,7 +3439,7 @@ export default function App() {
                 }
               }}
               onLoadStart={() => setIsVideoLoading(true)}
-              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); seekInFlightRef.current = true; }}
+              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); }}
               onSeeked={() => {
                 finishSeekCycle();
               }}
@@ -3214,6 +3482,13 @@ export default function App() {
                     if (parsedTime > 0 && parsedTime < (videoRef.current.duration - 2)) {
                       videoRef.current.currentTime = parsedTime;
                     }
+                  }
+                } else if (pendingRestoreRef.current !== null && videoRef.current) {
+                  // Re-encoded file swapped in — land back where we were.
+                  const t = pendingRestoreRef.current;
+                  pendingRestoreRef.current = null;
+                  if (t > 0 && t < (videoRef.current.duration || Infinity) - 1) {
+                    videoRef.current.currentTime = t;
                   }
                 }
                 if (isPlaying) videoRef.current?.play().catch(() => {});
@@ -3286,12 +3561,30 @@ export default function App() {
               }}
             />
 
-            {/* Seeking indicator */}
-            {isSeeking && !isHlsStream(videoSrc || '') && (
+            {/* Seeking indicator — only when the video starves over the network
+                (HLS / transcode). Local seeks resolve from disk and would only
+                flash a spinner for no benefit. */}
+            {isSeeking && !isScrubbing && (isHlsStream(videoSrc || '') || isTranscodedStream()) && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
                 <div className="bg-black/50 backdrop-blur-sm rounded-full p-3">
                   <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 </div>
+              </div>
+            )}
+
+            {/* Background keyframe optimization — one-time per file, cached. */}
+            {isOptimizing && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-black/75 backdrop-blur rounded-full pl-4 pr-2 py-2 text-xs text-white shadow-xl">
+                <Zap size={14} className="text-theme-accent shrink-0" />
+                <span className="whitespace-nowrap">
+                  {language === 'sv' ? `Optimerar för spolning… ${optimizePercent}%` : language === 'tr' ? `Atlama için optimize ediliyor… ${optimizePercent}%` : `Optimizing for seeking… ${optimizePercent}%`}
+                </span>
+                <div className="w-24 h-1 bg-white/20 rounded-full overflow-hidden">
+                  <div className="h-full bg-theme-accent transition-all" style={{ width: `${optimizePercent}%` }} />
+                </div>
+                <button onClick={cancelSeekOptimization} className="p-1 rounded-full hover:bg-white/15 transition-colors" title={language === 'sv' ? 'Avbryt' : language === 'tr' ? 'İptal' : 'Cancel'}>
+                  <X size={14} />
+                </button>
               </div>
             )}
 
@@ -3546,14 +3839,13 @@ export default function App() {
               className="absolute bottom-full mb-2 -translate-x-1/2 bg-theme-bg border border-theme-border rounded-lg shadow-xl overflow-hidden z-50 pointer-events-none"
               style={{ left: `calc(0.5rem + ${hoverPosition}px)` }}
             >
-              <video 
-                ref={previewVideoRef}
-                src={isHlsStream(videoSrc) ? undefined : (realVideoUrl || videoSrc || undefined)}
-                className="w-40 h-auto object-contain bg-black"
-                muted
-                preload="metadata"
-                playsInline
-              />
+              {previewFrame ? (
+                <img src={previewFrame} alt="" className="w-40 h-auto object-contain bg-black" draggable={false} />
+              ) : (
+                <div className="w-40 h-24 bg-black flex items-center justify-center text-[10px] text-white/40">
+                  {language === 'sv' ? 'Förhandsvisning…' : language === 'tr' ? 'Önizleme…' : 'Preview…'}
+                </div>
+              )}
               <div className="text-center text-xs text-theme-text font-mono py-1 bg-theme-bg-tertiary">
                 {formatTime(hoverTime)}
               </div>
@@ -3617,6 +3909,24 @@ export default function App() {
             <div className="text-xs font-mono text-theme-text-muted ml-2">
               {formatTime(currentTime)} / {formatTime(duration)}
             </div>
+
+            {/* Sparse keyframes are the actual cause of sluggish seeking. */}
+            {seekQuality && seekQuality.gopSeconds !== null && seekQuality.gopSeconds > 2 && !isOptimizing && !optimized && (
+              <button
+                onClick={runSeekOptimization}
+                className="ml-3 flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-theme-accent/15 hover:bg-theme-accent/25 text-theme-accent transition-colors"
+                title={`Keyframes every ${seekQuality.gopSeconds}s makes seeking slow (${seekQuality.gopSeconds > 5 ? 'long' : 'medium'} GOP). Click to re-encode with 1s keyframes for near-instant seeking.`}
+              >
+                <Zap size={13} />
+                {language === 'sv' ? 'Snabbare spolning' : language === 'tr' ? 'Daha hızlı atlama' : 'Faster seeking'}
+              </button>
+            )}
+            {optimized && (
+              <span className="ml-3 flex items-center gap-1 text-[11px] font-semibold text-green-400" title="Playing the seek-optimized copy (1s keyframes).">
+                <Zap size={13} />
+                {language === 'sv' ? 'Optimerad' : language === 'tr' ? 'Optimize' : 'Optimized'}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
