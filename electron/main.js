@@ -16,6 +16,32 @@ process.env.UV_THREADPOOL_SIZE = '64';
 
 /** Active FFmpeg pipe per response — kill previous on new seek to avoid decoder pile-up */
 let activeTranscodeCommand = null;
+/**
+ * Every FFmpeg child still feeding a /stream response. The player only ever
+ * plays one stream at a time, so a request that arrives while an older encoder
+ * is still running supersedes it. Without this rule an interrupted encode (file
+ * switch, seek, window close) could keep its pipe and its file handle open
+ * forever — one leaked encoder per switch.
+ */
+const streamPipes = new Set();
+
+/** Retire one stream encoder for good; safe to call before it has spawned. */
+function killStreamPipe(pipe) {
+  streamPipes.delete(pipe);
+  pipe.dead = true;
+  const child = pipe.child || pipe.command?.ffmpegProc || null;
+  if (child) {
+    pipe.child = child;
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }
+}
+
+/** Retire every stream encoder except `keep` — the newest request always wins. */
+function killOtherStreamPipes(keep) {
+  for (const pipe of [...streamPipes]) {
+    if (pipe !== keep) killStreamPipe(pipe);
+  }
+}
 /** Latest frame-extract process (scrub preview) */
 let activeFrameExtract = null;
 let frameExtractGen = 0;
@@ -29,6 +55,36 @@ ffmpeg.setFfmpegPath(ffmpegExePath);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * FFmpeg work that runs while the user is watching must stay invisible: it
+ * competes with Chromium's own decoder for CPU, and every cycle it takes is a
+ * dropped frame or a slower seek. Encode runs below normal OS priority (and
+ * with a thread cap set by the caller) so playback and seeking always win.
+ */
+function spawnIdleFfmpeg(args) {
+  if (process.platform === 'win32') {
+    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    try {
+      if (proc.pid) {
+        // Windows has no `nice`: drop the encoder to BelowNormal so the
+        // renderer's decoder always wins the CPU. Best effort — if this
+        // helper is unavailable the encode simply stays at normal priority.
+        const setter = spawn('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+          `try { (Get-Process -Id ${proc.pid} -ErrorAction Stop).PriorityClass = 'BelowNormal' } catch {}`
+        ], { windowsHide: true, stdio: 'ignore' });
+        setter.on('error', () => {});
+        const guard = setTimeout(() => { try { setter.kill(); } catch (_) {} }, 5000);
+        setter.on('close', () => clearTimeout(guard));
+        if (typeof setter.unref === 'function') setter.unref();
+      }
+    } catch (_) { /* ignore */ }
+    return proc;
+  }
+  // POSIX: one extra fork, no race with the encoder starting hot.
+  return spawn('nice', ['-n', '10', ffmpegExePath, ...args], { windowsHide: true });
+}
+
 let mainWindow = null;
 let streamServer = null;
 let streamPort = 3001;
@@ -37,6 +93,86 @@ let streamPort = 3001;
 const UNSEEKABLE_FORMATS = new Set([
   'mpegts', 'mpeg', 'avi', 'flv', 'asf', 'rm', 'rmvb', 'swf', 'vob'
 ]);
+
+/**
+ * Extensions whose container Chromium cannot demux at all. They go straight to
+ * the re-encoding pipe (a stream-copy remux would keep the unplayable codecs).
+ */
+const FORCE_TRANSCODE_EXTS = new Set([
+  '.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts',
+  '.rm', '.rmvb', '.divx', '.xvid', '.m1v', '.m2v', '.mpv', '.m2p', '.mxf',
+  '.asf', '.dv', '.vro', '.wtv', '.dvr-ms', '.amv'
+]);
+
+/**
+ * Video codecs Chromium can decode on its own. Anything else (MPEG-2, VC-1,
+ * DivX/Xvid, ...) must be *re-encoded* before it is handed to the player —
+ * copying such a track produces a working audio stream against a permanently
+ * black picture, with no error event to recover from.
+ * HEVC counts as decodable because Chromium uses the GPU's hardware decoder
+ * for it (PlatformHEVCDecoderSupport); on a machine without that support the
+ * player sees a dead video track and re-encodes it (see vforce below).
+ */
+const DECODABLE_VIDEO_CODECS = new Set(['h264', 'av1', 'vp8', 'vp9', 'hevc']);
+
+/**
+ * Audio codecs Chromium can decode. Everything else (AC-3, E-AC-3, DTS,
+ * ALAC, MP2, AMR, WMA, ...) comes out as complete silence against a fine
+ * picture — silent again, no error event. Such files take the pipe too; when
+ * the video track is decodable it is copied and only the audio is re-encoded,
+ * so the extra cost is small.
+ */
+const DECODABLE_AUDIO_CODECS = new Set([
+  'aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_f32le', 'pcm_u8'
+]);
+
+/**
+ * Track codec names from ffmpeg's header dump ("Stream #0:0: Video: h264 ...").
+ * The player uses them to tell "Chromium has no decoder for this track" apart
+ * from "this file simply has no such track" — only the first one is worth
+ * re-encoding.
+ */
+function probeStreamCodecs(videoPath) {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegExePath, ['-hide_banner', '-i', videoPath], { windowsHide: true });
+    let err = '';
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch (_) {}
+      resolve({ videoCodec: '', audioCodec: '' });
+    }, 8000);
+    proc.stderr.on('data', (d) => { if (err.length < 100000) err += d.toString(); });
+    proc.on('error', () => { clearTimeout(timer); resolve({ videoCodec: '', audioCodec: '' }); });
+    proc.on('close', () => {
+      clearTimeout(timer);
+      const v = err.match(/Stream #\d+:\d+.*?: Video: ([A-Za-z0-9_]+)/);
+      const a = err.match(/Stream #\d+:\d+.*?: Audio: ([A-Za-z0-9_]+)/);
+      resolve({
+        videoCodec: v ? v[1].toLowerCase() : '',
+        audioCodec: a ? a[1].toLowerCase() : ''
+      });
+    });
+  });
+}
+
+/** Codec probes are cached per file version (and per URL) so repeats are free. */
+const streamCodecCache = new Map();
+async function probeStreamCodecsCached(videoPath) {
+  let key = videoPath;
+  try {
+    const st = fs.statSync(videoPath);
+    key = `${videoPath}|${st.size}|${st.mtimeMs}`;
+  } catch (_) { /* remote URL or missing file — probe anyway */ }
+  const hit = streamCodecCache.get(key);
+  if (hit !== undefined) return hit;
+  const codecs = await probeStreamCodecs(videoPath);
+  if (streamCodecCache.size > 64) streamCodecCache.clear();
+  streamCodecCache.set(key, codecs);
+  return codecs;
+}
+
+async function probeVideoCodecCached(videoPath) {
+  return (await probeStreamCodecsCached(videoPath)).videoCodec;
+}
 
 function resolveLocalMediaPath(filePath) {
   if (!filePath || typeof filePath !== 'string') return '';
@@ -111,7 +247,7 @@ function probeKeyframeInterval(videoPath) {
       '-an', '-vf', 'showinfo',
       '-f', 'null', '-'
     ];
-    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    const proc = spawnIdleFfmpeg(args);
     let err = '';
     const timer = setTimeout(() => {
       try { proc.kill('SIGKILL'); } catch (_) {}
@@ -172,10 +308,15 @@ function optimizeForSeeking(cleanPath, opts = {}) {
     console.log(`[SeekOpt] ${cleanPath} -> dense keyframes every ${gopSec}s (crf ${crf}, ${preset})`);
 
     const gopFrames = Math.max(1, Math.round(gopSec * 30));
+    // Keep two cores free: the renderer needs them to decode what the user is
+    // actually watching while this runs.
+    const threads = Math.max(1, (os.cpus().length || 4) - 2);
     const args = [
       '-y', '-hide_banner', '-loglevel', 'error',
+      '-threads', String(threads),
       '-i', source,
       '-c:v', 'libx264', '-preset', preset, '-crf', String(crf),
+      '-threads', String(threads),
       '-g', String(gopFrames), '-keyint_min', String(gopFrames),
       '-sc_threshold', '0', '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
@@ -185,7 +326,7 @@ function optimizeForSeeking(cleanPath, opts = {}) {
       '-f', 'mp4',
       partPath
     ];
-    const proc = spawn(ffmpegExePath, args, { windowsHide: true });
+    const proc = spawnIdleFfmpeg(args);
     activeOptimizeProc = proc;
     let errBuf = '';
     let lastPct = -1;
@@ -383,6 +524,17 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.autoHideMenuBar = true;
 
+  // Media failures are logged in the renderer console, which nobody opens.
+  // Surface renderer errors in the app log so a black screen leaves a trace.
+  mainWindow.webContents.on('console-message', (...args) => {
+    const details = args[0];
+    const isError = details && typeof details === 'object' && 'level' in details
+      ? details.level === 'error'
+      : args[1] >= 3;
+    const message = details && typeof details === 'object' && 'message' in details ? details.message : args[2];
+    if (isError && message) console.error('[Renderer]', message);
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -507,30 +659,47 @@ function startStreamServer() {
 
     const server = express();
     
-    server.get('/stream', (req, res) => {
+    server.get('/stream', async (req, res) => {
       const videoPath = req.query.path;
       const transcode = req.query.transcode === 'true';
       const start = req.query.start ? parseFloat(req.query.start) : 0;
+      // Remote items are only served through the re-encoding pipe — that is how
+      // an IPTV/VOD stream with an undecodable video track gets a picture back.
+      const isRemote = /^https?:\/\//i.test(videoPath || '');
 
-      if (!videoPath || !fs.existsSync(videoPath)) {
+      if (!videoPath || (!isRemote && !fs.existsSync(videoPath))) {
         return res.status(404).send('File not found');
       }
 
-      const stat = fs.statSync(videoPath);
-      const fileSize = stat.size;
+      let fileSize = 0;
+      if (!isRemote) {
+        try { fileSize = fs.statSync(videoPath).size; } catch (_) { return res.status(404).send('File not found'); }
+      }
       const range = req.headers.range;
 
       const ext = path.extname(videoPath).toLowerCase();
-      const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
+      const needsFullTranscode = FORCE_TRANSCODE_EXTS.has(ext);
+      // The player can ask for a guaranteed picture (`vforce=1`) when it saw a
+      // dead video track while the codec was nominally decodable — HEVC on a
+      // machine whose GPU cannot decode it. Copying that track would keep the
+      // picture black, so honour the request by re-encoding regardless.
+      const forceVideo = req.query.vforce === 'true';
 
       if (transcode || needsFullTranscode) {
-        console.log(`[Stream] Transcoding ${needsFullTranscode ? 'FULL' : 'AUDIO'} from ${start}s: ${videoPath}`);
+        // Never copy a video codec Chromium cannot decode: that is the
+        // "audio plays, picture stays black" failure, and it is silent.
+        const videoCodec = await probeVideoCodecCached(videoPath);
+        const needsReencode = needsFullTranscode || forceVideo || !DECODABLE_VIDEO_CODECS.has(videoCodec);
+        console.log(`[Stream] ${needsReencode ? 'Transcoding' : 'Remuxing'} video (${videoCodec || 'unknown codec'}) from ${start}s: ${videoPath}`);
 
         // Kill previous transcode so rapid seeks don't stack FFmpeg processes
         if (activeTranscodeCommand) {
           try { activeTranscodeCommand.kill('SIGKILL'); } catch (_) {}
           activeTranscodeCommand = null;
         }
+        // …and the same for the encoder of an earlier request that never got
+        // its `close` (a switch that happened while it was still starting).
+        killOtherStreamPipes(null);
 
         res.writeHead(200, {
           'Content-Type': 'video/mp4',
@@ -541,13 +710,40 @@ function startStreamServer() {
         const command = ffmpeg(videoPath);
         activeTranscodeCommand = command;
 
+        const pipe = { command, res, child: null, dead: false };
+        // The child process only exists once ffmpeg has spawned. A request can
+        // already be gone by then (fast file switching), so remember that and
+        // kill the process the moment it appears instead of leaking it.
+        command.on('start', () => {
+          pipe.child = command.ffmpegProc || null;
+          if (!pipe.child) return;
+          if (pipe.dead) {
+            try { pipe.child.kill('SIGKILL'); } catch (_) {}
+          } else {
+            streamPipes.add(pipe);
+          }
+        });
+        command.on('end', () => streamPipes.delete(pipe));
+
         if (start > 0) {
           command.seekInput(start);
         }
 
-        if (needsFullTranscode) {
+        if (needsReencode) {
+          // Latency-tuned, but with the audio interleaved from the first
+          // packets: `-tune zerolatency` (plus `-max_interleave_delta 0`) was
+          // measured to push the first audio packet ~0.4s further into the
+          // stream, so the player opened on picture alone and only then caught
+          // up with the sound — heard (and seen) as a short vibration right
+          // after every seek. Without those two flags the very first audio
+          // packet sits ~0.4s earlier, next to the first picture. Preset/CRF/
+          // GOP still decide quality and how cheaply the stream can be seeked.
           command.videoCodec('libx264')
-                 .addOptions(['-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p', '-g 48', '-keyint_min 48']);
+                 .addOptions([
+                   '-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p',
+                   '-g 48', '-keyint_min 48',
+                   '-flush_packets 1'
+                 ]);
         } else {
           command.videoCodec('copy');
         }
@@ -564,10 +760,14 @@ function startStreamServer() {
 
         const cleanup = () => {
           if (activeTranscodeCommand === command) activeTranscodeCommand = null;
-          try { command.kill('SIGKILL'); } catch (_) {}
+          killStreamPipe(pipe);
         };
         res.on('close', cleanup);
         res.on('error', cleanup);
+        res.on('finish', cleanup);
+      } else if (isRemote) {
+        // Nothing to re-encode — let the player fetch it straight from the source.
+        return res.redirect(videoPath);
       } else {
         if (range) {
           const parts = range.replace(/bytes=/, "").split("-");
@@ -647,17 +847,80 @@ app.whenReady().then(() => {
   startStreamServer();
 });
 
-ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
+// Safety net: an encoder whose response is already gone must not outlive it.
+setInterval(() => {
+  for (const pipe of [...streamPipes]) {
+    if (pipe.dead || !pipe.res || pipe.res.destroyed || pipe.res.writableEnded) {
+      killStreamPipe(pipe);
+    }
+  }
+}, 5000).unref();
+
+/** Duration of a remote item, with a hard timeout — stream servers can hang. */
+function probeRemoteDuration(url) {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegExePath, ['-hide_banner', '-i', url], { windowsHide: true });
+    let err = '';
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch (_) {}
+      resolve(0);
+    }, 10000);
+    proc.stderr.on('data', (d) => { if (err.length < 100000) err += d.toString(); });
+    proc.on('error', () => { clearTimeout(timer); resolve(0); });
+    proc.on('close', () => {
+      clearTimeout(timer);
+      const m = err.match(/Duration: (\d\d):(\d\d):(\d\d)\.(\d\d)/);
+      resolve(m ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 100 : 0);
+    });
+  });
+}
+
+ipcMain.handle('get-stream-url', async (event, filePath, transcode = false, forceVideo = false) => {
   const port = await startStreamServer();
-  
+  const transcodeUrl = (p, extra = '') =>
+    `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(p)}&transcode=true${extra}`;
+
+  // Remote item (IPTV/VOD). Playing it directly is the norm — it only comes
+  // through here when playback asked for a re-encode, i.e. when the picture
+  // stayed black while the audio played.
+  if (/^https?:\/\//i.test(filePath || '')) {
+    return {
+      url: transcodeUrl(filePath, forceVideo ? '&vforce=1' : ''),
+      duration: await probeRemoteDuration(filePath),
+      isTranscoded: true,
+      localPath: null,
+      fileSize: 0,
+      remuxed: false,
+      format: null
+    };
+  }
+
   let cleanPath = resolveLocalMediaPath(filePath);
   
   const ext = path.extname(cleanPath).toLowerCase();
-  const needsFullTranscode = ['.vob', '.avi', '.wmv', '.flv', '.3gp', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid'].includes(ext);
+  const needsFullTranscode = FORCE_TRANSCODE_EXTS.has(ext);
   let willTranscode = transcode || needsFullTranscode;
 
   // Detect fake extensions: e.g. MPEG-TS saved as .mp4 — Chromium freezes ~1s on every seek
   const format = await probeInputFormat(cleanPath);
+
+  // Chromium has no decoder for plenty of video codecs (H.263, MPEG-2, VC-1,
+  // DivX, HEVC without hardware support, …). Playing such a file natively
+  // gives audio over a black picture with no error event to recover from.
+  // Deciding here — before a single frame — is what makes the picture appear
+  // instantly via the re-encoding pipe instead of after a visible failure.
+  if (!willTranscode) {
+    const { videoCodec, audioCodec } = await probeStreamCodecsCached(cleanPath);
+    if (videoCodec && !DECODABLE_VIDEO_CODECS.has(videoCodec)) {
+      console.log(`[Stream] video codec "${videoCodec}" has no Chromium decoder — routing to re-encode pipe: ${cleanPath}`);
+      willTranscode = true;
+      forceVideo = true;
+    } else if (audioCodec && !DECODABLE_AUDIO_CODECS.has(audioCodec)) {
+      console.log(`[Stream] audio codec "${audioCodec}" has no Chromium decoder — routing to re-encode pipe: ${cleanPath}`);
+      willTranscode = true;
+    }
+  }
+
   const needsRemux = !willTranscode && format && UNSEEKABLE_FORMATS.has(format);
 
   if (needsRemux) {
@@ -690,9 +953,8 @@ ipcMain.handle('get-stream-url', async (event, filePath, transcode = false) => {
     };
   }
 
-  const url = `http://127.0.0.1:${port}/stream?path=${encodeURIComponent(cleanPath)}&transcode=true`;
   return {
-    url,
+    url: transcodeUrl(cleanPath, forceVideo ? '&vforce=1' : ''),
     duration,
     isTranscoded: true,
     localPath: cleanPath,
@@ -723,7 +985,15 @@ ipcMain.handle('cancel-seek-optimize', async () => {
   const duration = await getVideoDuration(cleanPath);
   let size = 0;
   try { size = fs.statSync(cleanPath).size; } catch (_) {}
-  return { gopSeconds, duration, size, optimizeCached: validCachedFile(seekOptCachePath(cleanPath)) };
+  const { videoCodec, audioCodec } = await probeStreamCodecsCached(cleanPath);
+  return {
+    gopSeconds,
+    duration,
+    size,
+    optimizeCached: validCachedFile(seekOptCachePath(cleanPath)),
+    videoCodec,
+    audioCodec
+  };
 });
 
 /** A cached file only counts if it actually decodes — partial encodes must not
@@ -802,6 +1072,9 @@ ipcMain.handle('optimize-for-seeking', async (event, filePath, opts = {}) => {
       '-vcodec', 'mjpeg',
       'pipe:1'
     ];
+    // Interactive by design (hover preview): spawned many times a second, so it
+    // stays a plain fast spawn — priority games here would cost more than they
+    // save. Concurrency is limited by the caller instead.
     const proc = spawn(ffmpegExePath, args, { windowsHide: true });
     activeFrameExtract = proc;
     const chunks = [];

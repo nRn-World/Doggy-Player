@@ -538,6 +538,28 @@ const removeVideoBrightnessLock = (videoKey: string) => {
   }
 };
 
+/**
+ * Codecs Electron/Chromium can decode on its own. Files whose tracks use
+ * anything else silently fail on that track — black picture with sound, or a
+ * perfectly fine picture in total silence. VLC ships many more decoders, which
+ * is exactly why the same file plays there. Those files get handed to the
+ * re-encoding pipe. Video codecs are decided in electron/main.js
+ * (DECODABLE_VIDEO_CODECS); this list is the audio half of the same idea.
+ */
+const CHROMIUM_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le', 'pcm_f32le', 'pcm_u8'];
+
+/**
+ * Video codecs Chromium provably has no decoder for. When the file probe names
+ * one of these we can skip the failure entirely and start the re-encoding pipe
+ * right away — otherwise the user watches a black picture for seconds before
+ * the reactive detection kicks in.
+ */
+const UNDECODABLE_VIDEO_CODECS = [
+  'h263', 'h263p', 's263', 'mpeg1video', 'mpeg2video', 'mpeg4', 'msmpeg4v2', 'msmpeg4v3',
+  'wmv1', 'wmv2', 'wmv3', 'vc1', 'rv10', 'rv20', 'rv30', 'rv40', 'flv1', 'mjpeg', 'prores',
+  'dnxhd', 'rawvideo'
+];
+
 const parseXmlTvTime = (value: string): number => {
   const match = value.trim().match(
     /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/
@@ -566,9 +588,8 @@ export default function App() {
   const [realVideoUrl, setRealVideoUrl] = useState<string | null>(null);
   const [isRemuxing, setIsRemuxing] = useState(false);
   /** Long-GOP files make every seek pay a decode-forward. Opt-in fix. */
-  const [seekQuality, setSeekQuality] = useState<{ gopSeconds: number | null; duration: number; size: number; optimizeCached: boolean } | null>(null);
+  const [seekQuality, setSeekQuality] = useState<{ gopSeconds: number | null; duration: number; size: number; optimizeCached: boolean; videoCodec?: string; audioCodec?: string } | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizePercent, setOptimizePercent] = useState(0);
   const [optimized, setOptimized] = useState<{ srcKey: string; url: string; localPath: string; duration: number; size: number } | null>(null);
   const optimizedPathRef = useRef<string | null>(null);
   const pendingRestoreRef = useRef<number | null>(null);
@@ -651,14 +672,25 @@ export default function App() {
       }
 
       // Check if it's a local file path (handles raw paths and file:// URLs)
-      const isLocalPath = videoSrc.startsWith('/') || videoSrc.includes(':\\') || videoSrc.startsWith('file:');
+      // Windows paths arrive in several shapes: `C:\dir\file`, `C:/dir/file`
+      // (Explorer "Open with" / launch args), drive-relative `C:file` and UNC
+      // `\\server\share`. All of them must go through get-stream-url, or the
+      // codec check/transcode routing never runs for the file.
+      const isLocalPath = videoSrc.startsWith('/') || videoSrc.includes(':\\') || /^[a-zA-Z]:[\\/]/.test(videoSrc) || videoSrc.startsWith('\\\\') || videoSrc.startsWith('file:');
 
       // A seek-optimized copy already exists for this file — play that instead.
+      // It is an H.264/AAC MP4 with a dense keyframe interval, so the element
+      // seeks it natively: no pipe to rebuild, no re-encode per jump. Whatever
+      // forced the live pipe before (an undecodable codec) is moot now, so the
+      // transcode intent is retired with it.
       if (optimized && optimized.srcKey === videoSrc) {
         streamSeekOffsetRef.current = 0;
         streamDurationRef.current = optimized.duration;
         localMediaPathRef.current = optimized.localPath;
         mediaFileSizeRef.current = optimized.size || 0;
+        setIsTranscoding(false);
+        setIsRemuxing(false);
+        repairForceVideoRef.current = false;
         setRealVideoUrl(optimized.url);
         if (optimized.duration > 0) setDuration(optimized.duration);
         return;
@@ -668,7 +700,7 @@ export default function App() {
         try {
           const { ipcRenderer } = (window as any).require('electron');
           setIsRemuxing(true);
-          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding).then((res: {
+          ipcRenderer.invoke('get-stream-url', videoSrc, isTranscoding, repairForceVideoRef.current).then((res: {
             url: string;
             duration: number;
             localPath?: string;
@@ -694,6 +726,27 @@ export default function App() {
         } catch (e) {
           console.error("❌ IPC Require Error:", e);
           setIsRemuxing(false);
+          setRealVideoUrl(videoSrc);
+        }
+      } else if (isTranscoding && (window as any).require && /^https?:\/\//i.test(videoSrc)) {
+        // Remote item whose video track Chromium cannot decode: play it through
+        // the local re-encoding pipe instead of straight from the source.
+        try {
+          const { ipcRenderer } = (window as any).require('electron');
+          setIsRemuxing(false);
+          streamSeekOffsetRef.current = 0;
+          localMediaPathRef.current = null;
+          mediaFileSizeRef.current = 0;
+          ipcRenderer.invoke('get-stream-url', videoSrc, true, repairForceVideoRef.current).then((res: { url: string; duration: number }) => {
+            console.log("🎬 Re-encoding remote stream:", res.url, "Duration:", res.duration);
+            streamDurationRef.current = res.duration || 0;
+            setRealVideoUrl(res.url);
+            if (res.duration > 0) setDuration(res.duration);
+          }).catch((err: any) => {
+            console.error("❌ Remote stream URL error:", err);
+            setRealVideoUrl(videoSrc);
+          });
+        } catch {
           setRealVideoUrl(videoSrc);
         }
       } else {
@@ -723,14 +776,72 @@ export default function App() {
   useEffect(() => {
     setIsTranscoding(false);
     setIsRemuxing(false);
+    repairForceVideoRef.current = false;
+    clearSeekFrame();
+    transcodeIssuedRef.current = null;
   }, [videoSrc]);
 
-  // Report how far apart keyframes are. Long GOPs are the reason seeks stutter.
+  /** Live mirror of `isPlaying` for callbacks that must not re-render. */
+  const isPlayingLiveRef = useRef(false);
+  /**
+   * True while a source that should be playing is still being brought up.
+   * Swapping the source makes Chromium fire a `pause` and reject the play()
+   * that was already in flight; either one can leave a freshly opened file
+   * frozen on its first frame with `isPlaying` false. For a short window after
+   * every source change the player therefore keeps asserting the play intent
+   * until the element really runs — but never over a pause the user asked for.
+   */
+  const autoStartRef = useRef(false);
+  /** Set by every deliberate pause (button, Space, S, scrubbing, stop). */
+  const userPausedRef = useRef(false);
+
+  useEffect(() => {
+    isPlayingLiveRef.current = isPlaying;
+  }, [isPlaying]);
+
+  /**
+   * Bring a new source up playing, regardless of how the swap itself behaves.
+   * Time-boxed to the swap window, so it can never fight a later intent.
+   */
+  useEffect(() => {
+    if (!videoSrc || !isPlayingLiveRef.current) return;
+    userPausedRef.current = false;
+    autoStartRef.current = true;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      // 6s is comfortably longer than a probe plus the first encoded frames.
+      if (tries > 24 || userPausedRef.current) {
+        autoStartRef.current = false;
+        clearInterval(timer);
+        return;
+      }
+      const v = videoRef.current;
+      if (!v || v.ended || v.error) return;
+      if (!v.paused) return;
+      // An encoder-fed pipe hands over its first frame well before it can feed
+      // the next one. Starting on HAVE_CURRENT_DATA (2) means the element plays
+      // for a moment, runs dry and fires `waiting` — the stall heard/seen right
+      // after every seek. Wait for HAVE_FUTURE_DATA (3) instead, which is the
+      // first state where it really has something to keep playing.
+      if (isTranscodedStream() ? v.readyState < 3 : v.readyState < 2) return;
+      if (isScrubbingRef.current || seekInFlightRef.current || holdSeekIntervalRef.current) return;
+      v.play().catch(() => {});
+    }, 250);
+    return () => {
+      autoStartRef.current = false;
+      clearInterval(timer);
+    };
+  }, [videoSrc, realVideoUrl]);
+
+  // Report how far apart keyframes are, plus which codecs the file really
+  // carries. Both decide whether a one-time re-encode is worth it, and the
+  // answer is needed for pipe-served files too: those are exactly the ones with
+  // a codec Chromium cannot decode, and they are the worst to seek.
   useEffect(() => {
     setSeekQuality(null);
     const mediaPath = localMediaPathRef.current;
     if (!mediaPath || !realVideoUrl || isHlsStream(videoSrc || '')) return;
-    if (realVideoUrl.includes('&transcode=true')) return;
     if (!(window as any).require) return;
     const { ipcRenderer } = (window as any).require('electron');
     let cancelled = false;
@@ -740,38 +851,44 @@ export default function App() {
     return () => { cancelled = true; };
   }, [realVideoUrl, videoSrc]);
 
-  // Progress from the ffmpeg re-encode in the main process.
-  useEffect(() => {
-    if (!(window as any).require) return;
-    const { ipcRenderer } = (window as any).require('electron');
-    const onProgress = (_e: any, payload: any) => {
-      if (!payload) return;
-      if (payload.phase === 'start') setOptimizePercent(0);
-      else if (payload.phase === 'progress') setOptimizePercent(payload.percent || 0);
-    };
-    ipcRenderer.on('seek-optimize-progress', onProgress);
-    return () => { ipcRenderer.removeListener('seek-optimize-progress', onProgress); };
-  }, []);
-
   const runSeekOptimization = async () => {
     const mediaPath = localMediaPathRef.current;
     if (!mediaPath || !videoSrc || !(window as any).require) return;
     if (isOptimizing) return;
-    const resumeAt = videoRef.current?.currentTime || 0;
     const wasPlaying = videoRef.current ? !videoRef.current.paused : false;
     optimizeCancelledRef.current = false;
     setIsOptimizing(true);
-    setOptimizePercent(0);
     try {
       const { ipcRenderer } = (window as any).require('electron');
       const res = await ipcRenderer.invoke('optimize-for-seeking', mediaPath, { gopSeconds: 1, crf: 20, preset: 'veryfast' });
       if (optimizeCancelledRef.current) return;
+      // The user moved on while we were encoding — never swap a foreign file in.
+      if (localMediaPathRef.current !== mediaPath) return;
       if (res?.url) {
+        // Never swap the source out from under a seek. Chromium drops a seek
+        // that races a src change, so the jump the user just made would simply
+        // not happen. Wait for the interaction to land first (bounded, so a
+        // stuck seek lock can never block the swap forever).
+        for (let i = 0; i < 40; i++) {
+          if (!isSeekingRef.current && !seekInFlightRef.current && !isScrubbingRef.current && !holdSeekIntervalRef.current) break;
+          await new Promise((r) => setTimeout(r, 150));
+          if (optimizeCancelledRef.current || localMediaPathRef.current !== mediaPath) return;
+        }
+        // Position as the user sees it, not as the element counts it: a
+        // re-encoded pipe restarts at `streamSeekOffsetRef`, so its element
+        // clock is relative. Reading the raw clock would land the swapped-in
+        // copy in the wrong place every time the user seeked while it encoded.
+        // Read after the seeks above have settled, so the newest one is kept.
+        pendingRestoreRef.current =
+          (streamSeekOffsetRef.current || 0) + (videoRef.current?.currentTime || 0);
         optimizedPathRef.current = res.path;
-        pendingRestoreRef.current = resumeAt;
         setOptimized({ srcKey: videoSrc, url: res.url, localPath: res.path, duration: res.duration, size: res.size });
         setSeekQuality((q) => (q ? { ...q, gopSeconds: 1, optimizeCached: true } : q));
-        if (wasPlaying) setIsPlaying(true);
+        // Keep playing if it was playing — but never over a pause the user made
+        // while the encode ran, and never fall back to "playing" from a pause
+        // that is really just an in-flight seek.
+        const stillPlaying = videoRef.current ? !videoRef.current.paused : false;
+        if (stillPlaying || (wasPlaying && !userPausedRef.current)) setIsPlaying(true);
       }
     } catch (err: any) {
       if (!optimizeCancelledRef.current) console.error('[SeekOpt] Failed:', err?.message || err);
@@ -791,18 +908,123 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
-  // Long-GOP files can never seek smoothly — start the one-time keyframe
-  // optimization in the background shortly after playback begins. Cached, so
-  // it only ever runs once per file. Cancel stops it and disables auto-start.
+  // Files that are expensive to seek get a one-time background re-encode to a
+  // dense-keyframe H.264 MP4. Two things qualify: a long GOP (Chromium has to
+  // decode forward from the previous keyframe on every jump) and a video codec
+  // Chromium cannot decode at all (every jump has to tear down and rebuild the
+  // re-encoding pipe, which is heard as a stutter right after the seek). Cached,
+  // so it only ever runs once per file. Deliberately silent: no badge, no
+  // progress pill, and it never starts while the user is seeking (that is
+  // exactly when spare CPU matters). Cancel stops it and disables auto-start.
   useEffect(() => {
     if (!autoSeekOpt || isOptimizing || optimizeCancelledRef.current) return;
-    if (!seekQuality || seekQuality.gopSeconds === null || seekQuality.gopSeconds <= 2) return;
-    if (seekQuality.optimizeCached || optimized) return;
-    if (!localMediaPathRef.current || !(window as any).require) return;
-    const t = setTimeout(() => { runSeekOptimization(); }, 2500);
-    return () => clearTimeout(t);
+    if (!seekQuality || !localMediaPathRef.current || !(window as any).require) return;
+    if (optimized && optimized.srcKey === videoSrc) return;
+
+    // The re-encode is already on disk from an earlier play — adopt it right
+    // away instead of playing the re-encoding pipe again. Returning early here
+    // (as this used to) meant only the *first* play of a file got the fast copy;
+    // every later play fell back to a pipe that is torn down and rebuilt on
+    // every seek, which is exactly the stutter this is meant to remove.
+    if (seekQuality.optimizeCached) {
+      const adopt = setTimeout(() => runSeekOptimization(), 1200);
+      return () => clearTimeout(adopt);
+    }
+
+    const longGop = typeof seekQuality.gopSeconds === 'number' && seekQuality.gopSeconds > 2;
+    const undecodableCodec =
+      !!seekQuality.videoCodec && UNDECODABLE_VIDEO_CODECS.includes(seekQuality.videoCodec);
+    if (!longGop && !undecodableCodec) return;
+    // A codec re-encode is the only fix for an undecodable file, and on a
+    // feature-length one that is minutes of CPU and gigabytes of cache. Past
+    // half an hour the live pipe stays the cheaper answer: it starts playing at
+    // once and only its seeks are slower. A long GOP is still worth fixing
+    // whatever the length, which is the behaviour this setting always had.
+    if (undecodableCodec && !longGop && !(seekQuality.duration > 0 && seekQuality.duration <= 1800)) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const start = () => {
+      // Wait for the interaction to settle instead of competing with it.
+      if (isSeekingRef.current || isScrubbingRef.current || holdSeekIntervalRef.current) {
+        timer = setTimeout(start, 3000);
+        return;
+      }
+      runSeekOptimization();
+    };
+    timer = setTimeout(start, 2500);
+    return () => { if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekQuality, autoSeekOpt]);
+
+  /**
+   * Chromium fails a track silently when it has no decoder for it: an
+   * unsupported video codec keeps `videoWidth` at 0 while the clock runs (sound
+   * with a black picture), and an unsupported audio codec (AC-3, DTS, MP2,
+   * AMR, ...) gives a fine picture in complete silence — neither raises an
+   * `error` event. The decoded-byte counters expose both, and the probed codecs
+   * tell us whether the track even exists. When the track exists but produces
+   * nothing, hand the file to the re-encoding pipe: that is what makes "every
+   * format plays" true without waiting for a visible failure.
+   */
+  const repairStreakRef = useRef(0);
+  /** True when the repair is for a dead *video* track, not just audio: the
+   *  re-encode request then forces a video re-encode instead of a copy. */
+  const repairForceVideoRef = useRef(false);
+  useEffect(() => {
+    if (!isPlaying || !videoSrc || !(window as any).require) return;
+    if (isHlsStream(videoSrc) || isTranscoding || isTranscodedStream()) return;
+    const check = () => {
+      const v = videoRef.current;
+      if (!v || v.paused || v.readyState < 2) return;
+      if (v.currentTime < 0.4) return; // give the first frames a chance to land
+      const anyV = v as any;
+      const videoBytes = Number(anyV.webkitVideoDecodedByteCount) || 0;
+      const audioBytes = Number(anyV.webkitAudioDecodedByteCount) || 0;
+      const videoCodec = seekQuality?.videoCodec;
+      const audioCodec = seekQuality?.audioCodec;
+      let reason: string | null = null;
+      let videoDead = false;
+      if (videoBytes === 0 && v.videoWidth === 0 && (!seekQuality || videoCodec)) {
+        reason = `video codec "${videoCodec || 'unknown'}" has no decoder`;
+        videoDead = true;
+      } else if (videoBytes > 0 && audioBytes === 0 && audioCodec && !CHROMIUM_AUDIO_CODECS.includes(audioCodec)) {
+        reason = `audio codec "${audioCodec}" has no decoder`;
+      }
+      if (!reason) { repairStreakRef.current = 0; return; }
+      if (++repairStreakRef.current < 2) return;
+      console.warn(`[Video] ${reason} — re-encoding for playback`);
+      repairForceVideoRef.current = videoDead;
+      setIsTranscoding(true);
+    };
+    // Tight cadence: two consecutive detections already mean a dead track, and
+    // a short clip must not spend seconds in black before the pipe takes over.
+    const timers = [
+      setTimeout(check, 600),
+      setTimeout(check, 1200),
+      setTimeout(check, 2000),
+      setTimeout(check, 3200)
+    ];
+    return () => timers.forEach((t) => clearTimeout(t));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, videoSrc, realVideoUrl, isTranscoding, seekQuality]);
+
+  /**
+   * Proactive half of the same repair: once the probe names a video codec
+   * Chromium has no decoder for, switch to the re-encoding pipe immediately
+   * instead of playing (and failing) the original first.
+   */
+  useEffect(() => {
+    if (!seekQuality || isTranscoding) return;
+    if (!videoSrc || !(window as any).require || isHlsStream(videoSrc)) return;
+    if (isTranscodedStream()) return;
+    if (optimized && optimized.srcKey === videoSrc) return;
+    const codec = seekQuality.videoCodec;
+    if (!codec || !UNDECODABLE_VIDEO_CODECS.includes(codec)) return;
+    console.warn(`[Video] video codec "${codec}" has no decoder — re-encoding for playback`);
+    repairForceVideoRef.current = true;
+    setIsTranscoding(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekQuality, videoSrc, isTranscoding]);
 
   // Handle play/pause sync
   useEffect(() => {
@@ -827,7 +1049,10 @@ export default function App() {
         // For streams, ensure play
         videoRef.current.play().catch(() => {});
       }
-    } else if (!videoRef.current.paused) {
+    } else if (!videoRef.current.paused && !autoStartRef.current) {
+      // While a new source is still coming up, `isPlaying` can be false purely
+      // because the swap itself fired a `pause` — don't turn that echo into a
+      // real pause. The auto-start window ends on its own after a few seconds.
       videoRef.current.pause();
     }
   }, [isPlaying, videoSrc]);
@@ -1791,7 +2016,9 @@ export default function App() {
 
   // Handle File Upload
   const handleFiles = (files: FileList | File[]) => {
-    const videoExtensions = ['.mp4', '.m4v', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.ogg', '.ogv', '.3gp', '.vob', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid', '.mpeg', '.mpg', '.hevc', '.av1'];
+    // Accept every video container VLC would open — unplayable codecs inside
+    // them are handled by the re-encoding pipe, so nothing needs filtering out.
+    const videoExtensions = ['.mp4', '.m4v', '.mkv', '.avi', '.mov', '.qt', '.wmv', '.flv', '.webm', '.ogg', '.ogv', '.ogm', '.3gp', '.3g2', '.vob', '.ts', '.m2ts', '.mts', '.rm', '.rmvb', '.divx', '.xvid', '.mpeg', '.mpg', '.m1v', '.m2v', '.mpv', '.m2p', '.mxf', '.asf', '.dv', '.vro', '.wtv', '.dvr-ms', '.f4v', '.amv', '.y4m', '.hevc', '.av1', '.264', '.265'];
     const videoFiles = Array.from(files).filter(f => {
       if (f.type.startsWith('video/')) return true;
       const lowerName = f.name.toLowerCase();
@@ -2302,34 +2529,130 @@ export default function App() {
   const previewSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewTimeRef = useRef(0);
   const previewReqRef = useRef(0);
+  /** Thumbnail extraction in flight — one ffmpeg at a time, never more. */
+  const previewBusyRef = useRef(false);
   const [previewFrame, setPreviewFrame] = useState<string | null>(null);
 
   /** Pause between scrub preview seeks so one seek can land before the next. */
   const SCRUB_SEEK_INTERVAL_MS = 130;
 
+  /**
+   * The frame at the target position, painted over the video while a re-encoded
+   * stream jumps there. Re-encoding costs a few hundred milliseconds; without
+   * this the player looks like it is thinking. With it the picture moves at
+   * once and the running stream slides in underneath a moment later.
+   */
+  const [seekFrame, setSeekFrame] = useState<string | null>(null);
+  const seekFrameReqRef = useRef(0);
+  const seekFrameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Last pipe restart we asked for, so a key tap can't restart it twice. */
+  const transcodeIssuedRef = useRef<{ seconds: number; at: number } | null>(null);
+  /** Makes every pipe restart a distinct URL — see the note in seekTranscoded. */
+  const transcodeRestartSeqRef = useRef(0);
+
   const isTranscodedStream = () =>
     !!(realVideoUrl && realVideoUrl.includes('127.0.0.1') && realVideoUrl.includes('&transcode=true'));
+
+  /**
+   * `isSeeking` (state) exists only to drive the spinner overlay, which is
+   * never shown for local seeks. Flipping React state on every seek would
+   * re-render this very large tree twice per seek — real frame cost that
+   * reads as stutter while skipping around. Local seeks touch the ref only;
+   * `setIsSeeking(false)` is a free no-op when the state is already false.
+   */
+  const markSeeking = (on: boolean) => {
+    isSeekingRef.current = on;
+    if (!on || isHlsStream(videoSrc || '') || isTranscodedStream()) setIsSeeking(on);
+  };
 
   const clampSeekTime = (t: number) => {
     const dur = streamDurationRef.current || videoRef.current?.duration || Infinity;
     return Math.max(0, Math.min(Number.isFinite(dur) ? dur : Infinity, t));
   };
 
+  /**
+   * The `start` value a pipe restart uses. One canonical spelling for it, so
+   * the URL, the stream offset and the still-frame guard can never disagree —
+   * and millisecond precision, because a restart used to be rounded down to a
+   * whole second, which left the playhead showing a position up to 1s away
+   * from the picture and made the *next* relative seek start from the wrong
+   * place.
+   */
+  const pipeStartParam = (t: number) => String(Number(Math.max(0, t).toFixed(3)));
+
+  /** Pick up the destination frame without touching the video decoder. */
+  const showSeekFrame = (target: number) => {
+    const mediaPath = localMediaPathRef.current;
+    if (!mediaPath || !(window as any).require) return;
+    const req = ++seekFrameReqRef.current;
+    if (seekFrameTimerRef.current) clearTimeout(seekFrameTimerRef.current);
+    // Never leave a still over running video, whatever happens to the stream.
+    seekFrameTimerRef.current = setTimeout(() => {
+      if (req === seekFrameReqRef.current) setSeekFrame(null);
+    }, 4000);
+    const startParam = pipeStartParam(target);
+    (window as any).require('electron').ipcRenderer
+      .invoke('extract-seek-frame', mediaPath, Math.max(0, target))
+      .then((frame: string | null) => {
+        if (req !== seekFrameReqRef.current || !frame) return;
+        // A slow extraction can land after the stream is already running the
+        // new position — never cover live video with a still.
+        const v = videoRef.current;
+        if (v && !v.paused && v.readyState >= 2 && (v.currentSrc || '').includes(`&start=${startParam}`)) return;
+        setSeekFrame(frame);
+      })
+      .catch(() => {});
+  };
+
+  /** The stream is showing real pictures again — drop the still. */
+  const clearSeekFrame = () => {
+    seekFrameReqRef.current += 1;
+    if (seekFrameTimerRef.current) {
+      clearTimeout(seekFrameTimerRef.current);
+      seekFrameTimerRef.current = null;
+    }
+    setSeekFrame((cur) => (cur === null ? cur : null));
+  };
+
   const seekTranscoded = (newTime: number) => {
     const clampedTime = clampSeekTime(newTime);
-    streamSeekOffsetRef.current = clampedTime;
+    // The offset is what the pipe really starts from, not the rounded second it
+    // used to ask for: stream time 0 has to mean this exact position.
+    streamSeekOffsetRef.current = Number(pipeStartParam(clampedTime));
     setCurrentTime(clampedTime);
     wasPlayingBeforeSeekRef.current = wasPlayingBeforeSeekRef.current || !!(videoRef.current && !videoRef.current.paused);
-    isSeekingRef.current = true;
-    setIsSeeking(true);
-    if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
-    transcodeSeekTimerRef.current = setTimeout(() => {
+    markSeeking(true);
+    // Paint the destination frame first: the jump reads as instant even though
+    // the pipe underneath still has to be rebuilt.
+    showSeekFrame(clampedTime);
+
+    const seconds = pipeStartParam(clampedTime);
+    const restart = () => {
       transcodeSeekTimerRef.current = null;
-      if (realVideoUrl) {
-        const baseUrl = realVideoUrl.split('&start=')[0];
-        setRealVideoUrl(`${baseUrl}&start=${Math.floor(clampedTime)}`);
-      }
-    }, 300);
+      if (!realVideoUrl) return;
+      const now = performance.now();
+      const issued = transcodeIssuedRef.current;
+      // A tap seeks twice (press and release land on the same position); the
+      // second one must not tear the fresh stream down again.
+      if (issued && issued.seconds === seconds && now - issued.at < 400) return;
+      transcodeIssuedRef.current = { seconds, at: now };
+      // The sequence number matters: seeking back to the offset the pipe was
+      // already started from ("go to the beginning" while it runs from there)
+      // would otherwise produce the identical URL, React would drop the update
+      // and the jump would simply not happen. The server ignores the extra
+      // parameter, the element gets a fresh source and the pipe restarts.
+      const seq = ++transcodeRestartSeqRef.current;
+      setRealVideoUrl(`${realVideoUrl.split('&start=')[0]}&start=${seconds}&r=${seq}`);
+    };
+
+    if (transcodeSeekTimerRef.current) clearTimeout(transcodeSeekTimerRef.current);
+    // Dragging the timeline fires every ~130ms: those must coalesce into one
+    // restart per landed seek. A key tap is a single decision and goes at once.
+    if (isScrubbingRef.current) {
+      transcodeSeekTimerRef.current = setTimeout(restart, 300);
+    } else {
+      restart();
+    }
   };
 
   /** Apply one media seek. Never leave an overlay on top of the video. */
@@ -2354,8 +2677,7 @@ export default function App() {
     // Already parked on this frame — re-seeking would only cost a decoder flush.
     if (v.readyState >= 2 && Math.abs(v.currentTime - target) < 0.03) {
       seekInFlightRef.current = false;
-      isSeekingRef.current = false;
-      setIsSeeking(false);
+      markSeeking(false);
       resumeAfterSeek();
       return;
     }
@@ -2382,8 +2704,7 @@ export default function App() {
    */
   const markSeekInFlight = () => {
     seekInFlightRef.current = true;
-    isSeekingRef.current = true;
-    setIsSeeking(true);
+    markSeeking(true);
     clearSeekWatchdog();
     seekWatchdogRef.current = setTimeout(() => {
       seekWatchdogRef.current = null;
@@ -2433,8 +2754,7 @@ export default function App() {
       }
     }
 
-    isSeekingRef.current = false;
-    setIsSeeking(false);
+    markSeeking(false);
 
     const raw = videoRef.current?.currentTime || 0;
     setCurrentTime(streamSeekOffsetRef.current + raw);
@@ -2552,6 +2872,10 @@ export default function App() {
     if (holdSeekIntervalRef.current) { clearInterval(holdSeekIntervalRef.current); holdSeekIntervalRef.current = null; }
     holdSeekDeltaRef.current = 0;
     if (transcodeSeekTimerRef.current) { clearTimeout(transcodeSeekTimerRef.current); transcodeSeekTimerRef.current = null; }
+    // A background encode aimed at the video we just left would keep burning
+    // CPU during this one. Kill it, then re-arm auto-start for the new file.
+    void cancelSeekOptimization();
+    optimizeCancelledRef.current = false;
   }, [videoSrc]);
 
   // Drive the playhead from decoded frames instead of `timeupdate` (~4Hz), so
@@ -2588,13 +2912,22 @@ export default function App() {
   // Keyboard Shortcuts (VLC style)
   const handleKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
+    // Only real text entry swallows the shortcuts. A focused slider must not:
+    // clicking the volume (or any range input) used to leave every key —
+    // including the arrow keys — captured by that widget, so seeking appeared
+    // to do nothing until something else took focus away.
+    const isRange = target instanceof HTMLInputElement && target.type === 'range';
     if (
       target?.isContentEditable ||
-      target?.tagName === 'INPUT' ||
       target?.tagName === 'TEXTAREA' ||
-      target?.tagName === 'SELECT'
+      target?.tagName === 'SELECT' ||
+      (target?.tagName === 'INPUT' && !isRange)
     ) {
       return;
+    }
+    if (isRange) {
+      // Hand the keys to the player, not to the slider under the pointer.
+      target.blur();
     }
 
     keysPressed.current[e.code] = true;
@@ -2987,6 +3320,7 @@ export default function App() {
         initAudio(); // Initialize audio context on first user interaction
         videoRef.current.play();
       } else {
+        userPausedRef.current = true;
         videoRef.current.pause();
       }
     }
@@ -2994,6 +3328,7 @@ export default function App() {
 
   const stopVideo = () => {
     if (videoRef.current) {
+      userPausedRef.current = true;
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
       setIsPlaying(false);
@@ -3019,6 +3354,7 @@ export default function App() {
     const v = videoRef.current;
     if (v && !v.paused) {
       wasPlayingBeforeSeekRef.current = true;
+      userPausedRef.current = true;
       try { v.pause(); } catch { /* ignore */ }
     }
 
@@ -3102,6 +3438,12 @@ export default function App() {
     if (previewSeekTimerRef.current) return;
     previewSeekTimerRef.current = setTimeout(() => {
       previewSeekTimerRef.current = null;
+      // While dragging the playhead the video is already parked on the cursor,
+      // and while a seek is in flight the decoder is the scarce resource —
+      // spawning ffmpeg in either case is exactly what makes scrubbing hack.
+      if (isScrubbingRef.current || seekInFlightRef.current) return;
+      if (previewBusyRef.current) return;
+      previewBusyRef.current = true;
       const req = ++previewReqRef.current;
       const { ipcRenderer } = (window as any).require('electron');
       ipcRenderer.invoke('extract-seek-frame', mediaPath, previewTimeRef.current)
@@ -3109,7 +3451,8 @@ export default function App() {
           if (req !== previewReqRef.current) return;
           setPreviewFrame(frame);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { previewBusyRef.current = false; });
     }, 120);
   };
 
@@ -3172,6 +3515,14 @@ export default function App() {
   } else if (isSelecting) {
     cursorStyle = 'crosshair';
   }
+
+  /**
+   * The IPTV channel-transition overlay is for network channels only. It hides
+   * the video element completely (bg-black/95 + opacity-0), so a local file
+   * that hits a load/waiting state while the sidebar sits in IPTV mode would
+   * look like "audio but a black screen" for no reason.
+   */
+  const showChannelTransition = isVideoLoading && sidebarMode === 'iptv' && /^https?:\/\//i.test(videoSrc || '');
 
   let transformStyle: React.CSSProperties = {
     filter: 'brightness(' + brightness + ')'
@@ -3364,7 +3715,7 @@ export default function App() {
                 <label className="cursor-pointer bg-theme-accent hover:opacity-90 text-black px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center gap-2 shadow-xl active:scale-95">
                   <FileVideo size={18} />
                   <span>{t.chooseFiles}</span>
-                  <input type="file" accept="video/*,.mkv,.avi,.mov,.wmv,.flv,.ts,.m2ts,.mts,.vob,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg" multiple className="hidden" onChange={handleFileChange} />
+                  <input type="file" accept="video/*,.mkv,.avi,.mov,.qt,.wmv,.flv,.webm,.ogg,.ogv,.ogm,.3gp,.3g2,.vob,.ts,.m2ts,.mts,.rm,.rmvb,.divx,.xvid,.mpeg,.mpg,.m1v,.m2v,.mpv,.m2p,.mxf,.asf,.dv,.vro,.wtv,.dvr-ms,.f4v,.amv,.y4m,.hevc,.av1,.264,.265" multiple className="hidden" onChange={handleFileChange} />
                 </label>
               </div>
             </div>
@@ -3372,7 +3723,7 @@ export default function App() {
         ) : (
           <>
              {/* Smooth Channel Transition Overlay */}
-            {isVideoLoading && sidebarMode === 'iptv' && (
+            {showChannelTransition && (
               <div className="absolute inset-0 z-[40] flex flex-col items-center justify-center bg-black/95 backdrop-blur-3xl animate-in fade-in duration-300">
                  <div className="relative w-20 h-20 flex items-center justify-center mb-6">
                    <div className="absolute inset-0 border-4 border-theme-bg-tertiary/30 rounded-full"></div>
@@ -3401,7 +3752,7 @@ export default function App() {
               muted={isMuted}
               preload="auto"
               playsInline
-              className={`w-full h-full object-contain transition-opacity duration-300 ${isVideoLoading && sidebarMode === 'iptv' ? 'opacity-0' : 'opacity-100'}`}
+              className={`w-full h-full object-contain transition-opacity duration-300 ${showChannelTransition ? 'opacity-0' : 'opacity-100'}`}
               style={transformStyle}
               onCanPlay={() => {
                 setIsVideoLoading(false);
@@ -3411,8 +3762,7 @@ export default function App() {
                 // seek pile on and restarts playback from a half-seeked
                 // position, which is heard/seen as the video doubling.
                 if (seekInFlightRef.current || isScrubbingRef.current) return;
-                setIsSeeking(false);
-                isSeekingRef.current = false;
+                markSeeking(false);
                 if ((isPlaying || wasPlayingBeforeSeekRef.current) && videoRef.current && videoRef.current.paused) {
                   wasPlayingBeforeSeekRef.current = false;
                   videoRef.current.play().catch(() => {});
@@ -3420,26 +3770,27 @@ export default function App() {
               }}
               onPlaying={() => {
                 setIsVideoLoading(false);
+                // Real pictures are flowing — the destination still is done.
+                clearSeekFrame();
                 // Never release the seek lock on `playing` — it is owned by the
                 // seek controller until `seeked`. Clearing it early is what let
                 // overlapping seeks stack up.
                 if (seekInFlightRef.current || isScrubbingRef.current) return;
-                setIsSeeking(false);
-                isSeekingRef.current = false;
+                markSeeking(false);
               }}
+              onLoadedData={clearSeekFrame}
               onWaiting={() => {
                 const isTranscoded = realVideoUrl?.includes('&transcode=true');
                 // For large local files (non-transcoded), show subtle seeking state instead of full IPTV overlay
                 if (!isHlsStream(videoSrc || '') && !isTranscoded && duration > 0) {
                   // keep video visible during seek, just mark seeking
-                  isSeekingRef.current = true;
-                  setIsSeeking(true);
+                  markSeeking(true);
                 } else {
                   setIsVideoLoading(true);
                 }
               }}
               onLoadStart={() => setIsVideoLoading(true)}
-              onSeeking={() => { isSeekingRef.current = true; setIsSeeking(true); }}
+              onSeeking={() => markSeeking(true)}
               onSeeked={() => {
                 finishSeekCycle();
               }}
@@ -3453,6 +3804,9 @@ export default function App() {
                 if (video?.error) {
                   console.error('Video error:', video.error.message, video.error.code);
                   if (video.error.code === 4 && !isTranscoding) {
+                    // A load-level refusal is almost always the video track —
+                    // force a real re-encode instead of copying it forward.
+                    repairForceVideoRef.current = true;
                     setIsTranscoding(true); // Automatically try repair if it fails completely
                   }
                 }
@@ -3475,7 +3829,15 @@ export default function App() {
                 } else if (streamDurationRef.current > 0) {
                   setDuration(streamDurationRef.current);
                 }
-                if (resumePlayback && videoSrc) {
+                // A freshly swapped-in optimized copy must land exactly where
+                // the old one was — that beats the saved-progress resume.
+                if (pendingRestoreRef.current !== null && videoRef.current) {
+                  const t = pendingRestoreRef.current;
+                  pendingRestoreRef.current = null;
+                  if (t > 0 && t < (videoRef.current.duration || Infinity) - 1) {
+                    videoRef.current.currentTime = t;
+                  }
+                } else if (resumePlayback && videoSrc) {
                   const savedTime = localStorage.getItem(`cinelens_progress_${videoSrc}`);
                   if (savedTime && videoRef.current) {
                     const parsedTime = parseFloat(savedTime);
@@ -3483,18 +3845,24 @@ export default function App() {
                       videoRef.current.currentTime = parsedTime;
                     }
                   }
-                } else if (pendingRestoreRef.current !== null && videoRef.current) {
-                  // Re-encoded file swapped in — land back where we were.
-                  const t = pendingRestoreRef.current;
-                  pendingRestoreRef.current = null;
-                  if (t > 0 && t < (videoRef.current.duration || Infinity) - 1) {
-                    videoRef.current.currentTime = t;
-                  }
                 }
-                if (isPlaying) videoRef.current?.play().catch(() => {});
+                // Deliberately no play() here. `loadedmetadata` only means the
+                // element knows the track layout — there is not one frame or
+                // audio sample yet. Starting here made the element fire `play`
+                // and immediately `waiting` on every source swap, which is the
+                // stutter at the start of a seek. Playback starts on
+                // `loadeddata`/`canplay` (and the auto-start window) instead.
               }}
               onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
+              onPause={() => {
+                // Swapping the source pauses the element by itself — the load
+                // algorithm does it, no user involved. Treating that echo as a
+                // real pause is what left the player silent a few seconds later:
+                // `isPlaying` went false behind the user's back, and the next
+                // time the play/pause sync effect ran it paused a running video.
+                if (autoStartRef.current && !userPausedRef.current) return;
+                setIsPlaying(false);
+              }}
               onEnded={() => {
                 if (repeat === 'one') {
                   if (videoRef.current) {
@@ -3561,30 +3929,28 @@ export default function App() {
               }}
             />
 
+            {/* The destination frame, painted while a re-encoded stream jumps
+                there. It is the position the user asked for, so the jump reads
+                as instant — no spinner, no black frame while ffmpeg restarts. */}
+            {seekFrame && (
+              <img
+                src={seekFrame}
+                alt=""
+                draggable={false}
+                className="absolute inset-0 w-full h-full object-contain pointer-events-none z-20"
+              />
+            )}
+
             {/* Seeking indicator — only when the video starves over the network
-                (HLS / transcode). Local seeks resolve from disk and would only
-                flash a spinner for no benefit. */}
-            {isSeeking && !isScrubbing && (isHlsStream(videoSrc || '') || isTranscodedStream()) && (
+                (HLS, or a remote item being re-encoded). A local seek shows its
+                destination frame instead, so a spinner here would only look
+                like the player thinking. */}
+            {isSeeking && !isScrubbing && !seekFrame
+              && (isHlsStream(videoSrc || '') || (isTranscodedStream() && /^https?:/i.test(videoSrc || ''))) && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
                 <div className="bg-black/50 backdrop-blur-sm rounded-full p-3">
                   <div className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 </div>
-              </div>
-            )}
-
-            {/* Background keyframe optimization — one-time per file, cached. */}
-            {isOptimizing && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-black/75 backdrop-blur rounded-full pl-4 pr-2 py-2 text-xs text-white shadow-xl">
-                <Zap size={14} className="text-theme-accent shrink-0" />
-                <span className="whitespace-nowrap">
-                  {language === 'sv' ? `Optimerar för spolning… ${optimizePercent}%` : language === 'tr' ? `Atlama için optimize ediliyor… ${optimizePercent}%` : `Optimizing for seeking… ${optimizePercent}%`}
-                </span>
-                <div className="w-24 h-1 bg-white/20 rounded-full overflow-hidden">
-                  <div className="h-full bg-theme-accent transition-all" style={{ width: `${optimizePercent}%` }} />
-                </div>
-                <button onClick={cancelSeekOptimization} className="p-1 rounded-full hover:bg-white/15 transition-colors" title={language === 'sv' ? 'Avbryt' : language === 'tr' ? 'İptal' : 'Cancel'}>
-                  <X size={14} />
-                </button>
               </div>
             )}
 
@@ -3910,8 +4276,13 @@ export default function App() {
               {formatTime(currentTime)} / {formatTime(duration)}
             </div>
 
-            {/* Sparse keyframes are the actual cause of sluggish seeking. */}
-            {seekQuality && seekQuality.gopSeconds !== null && seekQuality.gopSeconds > 2 && !isOptimizing && !optimized && (
+            {/* Sparse keyframes are the actual cause of sluggish seeking.
+                Auto mode handles it silently in the background, so this manual
+                shortcut only exists when auto-start is turned off. */}
+            {seekQuality && !isOptimizing &&
+              ((typeof seekQuality.gopSeconds === 'number' && seekQuality.gopSeconds > 2) ||
+                (!!seekQuality.videoCodec && UNDECODABLE_VIDEO_CODECS.includes(seekQuality.videoCodec))) &&
+              !(optimized && optimized.srcKey === videoSrc) && !autoSeekOpt && (
               <button
                 onClick={runSeekOptimization}
                 className="ml-3 flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-theme-accent/15 hover:bg-theme-accent/25 text-theme-accent transition-colors"
@@ -3920,12 +4291,6 @@ export default function App() {
                 <Zap size={13} />
                 {language === 'sv' ? 'Snabbare spolning' : language === 'tr' ? 'Daha hızlı atlama' : 'Faster seeking'}
               </button>
-            )}
-            {optimized && (
-              <span className="ml-3 flex items-center gap-1 text-[11px] font-semibold text-green-400" title="Playing the seek-optimized copy (1s keyframes).">
-                <Zap size={13} />
-                {language === 'sv' ? 'Optimerad' : language === 'tr' ? 'Optimize' : 'Optimized'}
-              </span>
             )}
           </div>
 
