@@ -1,6 +1,11 @@
-Creative Commons Attribution-NonCommercial 4.0 International Public License
+Doggy Player — License
+======================
 
-Copyright (c) 2026 Doggy Player
+Creative Commons Attribution-NonCommercial 4.0 International Public License
+(CC BY-NC 4.0)
+SPDX-License-Identifier: CC-BY-NC-4.0
+
+Copyright (c) 2026 nRn World (Doggy Player)
 
 By exercising the Licensed Rights (defined below), You accept and agree to be
 bound by the terms and conditions of this Creative Commons
@@ -20,6 +25,13 @@ Under the following terms:
   No additional restrictions — You may not apply legal terms or technological
   measures that legally restrict others from doing anything the license permits.
 
+Commercial licensing:
+  Commercial use, sale, or redistribution for profit is prohibited without
+  prior written permission. Companies and organizations must obtain a paid
+  commercial license before using Doggy Player or its source code for
+  professional or revenue-generating purposes.
+  Contact: bynrnworld@gmail.com
+
 Notices:
   You do not have to comply with the license for elements of the material in the
   public domain or where your use is permitted by an applicable exception or
@@ -38,3 +50,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Full license: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+Summary: https://creativecommons.org/licenses/by-nc/4.0/

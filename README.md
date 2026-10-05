@@ -1,6 +1,9 @@
 # Doggy Player 🐶
 
 ![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-red.svg)
+[![Latest Release](https://img.shields.io/github/v/release/nRn-World/Doggy-Player?sort=semver&label=latest&color=2ea44f)](https://github.com/nRn-World/Doggy-Player/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/nRn-World/Doggy-Player/total?label=downloads&color=blue)](https://github.com/nRn-World/Doggy-Player/releases)
+[![Stars](https://img.shields.io/github/stars/nRn-World/Doggy-Player?label=stars&color=yellow)](https://github.com/nRn-World/Doggy-Player/stargazers)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](https://github.com/nRn-World/Doggy-Player)
 [![Language: TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 [![Framework: React](https://img.shields.io/badge/Framework-React-61DAFB.svg)](https://react.dev/)
@@ -10,7 +13,8 @@
 
 ### ⚠️ COMMERCIAL USE & LICENSING NOTICE
 
-This project is licensed under the **nRn World Non-Commercial License**.
+This project is licensed under the **nRn World Non-Commercial License**
+([Creative Commons BY-NC 4.0](LICENSE.txt)).
 
 *   **Individuals & Students:** Free to download, use, and modify for personal education and private use. You are **PROHIBITED** from generating any income or profit from this software or its code.
 *   **Companies & Organizations:** Professional use requires prior written consent.
@@ -20,12 +24,14 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ---
 
-**Doggy Player** is a next-generation, high-performance video player built for modern users. Designed with a sleek, dark-themed interface, it offers unparalleled control over your viewing experience with unique features like intuitive mouse-wheel zooming, custom area selection, on-the-fly rotation, and seamless playlist management.
+**Doggy Player** is a next-generation, high-performance video player built for modern users. Designed with a sleek, dark-themed interface, it offers unparalleled control over your viewing experience with unique features like intuitive mouse-wheel zooming, custom area selection, on-the-fly rotation, and seamless playlist management — all with VLC-style instant seeking.
 
 ---
 
 ## Key Features
 
+* **VLC-Style Gapless Seeking (v1.1.75)**: Seeks land instantly with no audio/video "vibration" at the start of a jump — playback begins when real data exists, re-encoded streams interleave audio with the first picture, and pipe restarts use millisecond-exact offsets.
+* **Native Seeking for Hard Files (v1.1.75)**: Files Chromium cannot decode (H.263, MPEG-4, MJPEG, WMV, ProRes, ...) are re-encoded once in the background to a dense-keyframe H.264/AAC MP4 and cached, so later seeks are as fast as a native file.
 * **Smart Remux Seeking (v1.1.68)**: Detects MPEG-TS (and similar) files mislabeled as `.mp4` and remuxes them once to real seekable MP4 — fixes the ~1s freeze on certain large files.
 * **Advanced Zooming & Panning**: Smooth mouse-wheel zoom and click-to-pan.
 * **Area Selection Zoom**: Hold `Shift` and draw a rectangle to zoom into details.
@@ -46,13 +52,19 @@ This project is licensed under the **nRn World Non-Commercial License**.
 
 ## 📥 Getting Started
 
-### For Users (Windows)
-1.  Download the latest installer from the [**Releases**](https://github.com/nRn-World/Doggy-Player/releases) page.
-2.  Run `Doggy-Player-Setup.exe`.
-3.  Enjoy your media!
+### For Users
+
+1.  Download the latest build from the [**Releases**](https://github.com/nRn-World/Doggy-Player/releases/latest) page.
+    *   **Windows:** `Doggy-Player-Setup-<version>.exe` (recommended)
+    *   **macOS:** `Doggy-Player-<version>.dmg`
+    *   **Linux:** `Doggy-Player-<version>.AppImage`
+2.  Run the installer and open Doggy Player.
+3.  Already installed? Doggy Player keeps itself up to date automatically through its built-in updater — no manual downloading needed.
+4.  Enjoy your media!
 
 ### For Developers (Setup)
-We welcome community contributions! Please read our [**Contributing Guidelines**](CONTRIBUTING.md) before starting.
+
+We welcome community contributions! Please read our [**Contributing Guidelines**](CONTRIBUTING.md) and our [**Code of Conduct**](CODE_OF_CONDUCT.md) before starting.
 
 1.  **Clone the repo:**
     ```bash
@@ -74,7 +86,7 @@ We welcome community contributions! Please read our [**Contributing Guidelines**
 ---
 
 ## 🛡️ Security
-We take security seriously. Please review our [**Security Policy**](SECURITY.md) to report any vulnerabilities.
+We take security seriously. Please review our [**Security Policy**](SECURITY.md) to report any vulnerabilities privately — never through a public issue.
 
 ---
 
@@ -112,17 +124,55 @@ We take security seriously. Please review our [**Security Policy**](SECURITY.md)
 *   **Frontend**: [React 19](https://react.dev/), [Vite](https://vitejs.dev/)
 *   **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 *   **Icons**: [Lucide React](https://lucide.dev/)
+*   **Media**: [FFmpeg](https://ffmpeg.org/) (via `ffmpeg-static`), [hls.js](https://github.com/video-dev/hls.js/)
 
 ---
 
 ## 🤝 Community & Support
-*   ⭐ **Star this project** if you find it useful!
+
+*   ⭐ **Star this project** if you find it useful — it really helps!
+*   💬 **Ask questions and share ideas** in [GitHub Discussions](https://github.com/nRn-World/Doggy-Player/discussions).
 *   🐛 **Report bugs** via [GitHub Issues](https://github.com/nRn-World/Doggy-Player/issues).
+*   🤝 **Contribute code**: read [CONTRIBUTING.md](CONTRIBUTING.md) and follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+*   🛡️ **Report a security problem** privately through our [Security Policy](SECURITY.md).
 *   ☕ **Support development**: [Buy me a coffee 💜](https://ko-fi.com/nrnworld)
 
 ---
 
----
+## Release Notes v1.1.75
+
+Seeking now behaves like VLC: the jump is instant, with no audio/video "vibration" at the start of a seek:
+
+* **No more stutter at the start of a seek:** Playback now starts when real data exists instead of as soon as the track layout is known, so Chromium no longer fires `waiting` on every source swap.
+* **Audio starts with the picture:** The re-encode pipe interleaves audio with the first picture instead of pushing the first audio packet ~0.4s further into the stream.
+* **Seeking becomes native:** Files whose video codec Chromium cannot decode (H.263, MPEG-4, MJPEG, WMV, ProRes, ...) are re-encoded once in the background to a dense-keyframe H.264/AAC MP4 and cached; an already cached copy is adopted immediately on the next play.
+* **Exact seek positions:** Pipe restarts are millisecond exact instead of rounded down to whole seconds.
+* **Automatic update:** Installed apps receive v1.1.75 via the built-in updater.
+
+## Release Notes v1.1.72
+
+Smoother, quieter seeking:
+
+* **Keyframe densification:** Files that seek poorly are re-encoded once to a dense-keyframe MP4 and cached, so subsequent jumps are fast.
+* **Seek controller fixes:** Rapid scrubbing and hold-to-seek no longer stack requests; the playhead stays with the picture.
+* **Vibration removal:** Reworked the seek path so jumps no longer produce the audio "vibration" heard before.
+* **Automatic update:** Installed apps receive v1.1.72 via the built-in updater.
+
+## Release Notes v1.1.71
+
+Bug fixes.
+
+## Release Notes v1.1.70
+
+Bug fixes.
+
+## Release Notes v1.1.69
+
+Fixes settings dropdowns that closed immediately so you could not change default speed or IPTV default quality:
+
+* **Settings menus stay open:** Replaced fragile native `<select>` controls with custom menus for language, default speed, and IPTV default quality.
+* **Focus trap fixed:** The settings overlay no longer steals focus on every video time update (which closed open dropdowns instantly).
+* **Auto-update for all platforms:** Windows (`latest.yml`), macOS (`latest-mac.yml`) and Linux (`latest-linux.yml`) are published to GitHub Releases.
 
 ## Release Notes v1.1.68
 

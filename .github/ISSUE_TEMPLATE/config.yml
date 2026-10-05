@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions, help & ideas
+    url: https://github.com/nRn-World/Doggy-Player/discussions
+    about: Ask for help, share your setup, or discuss ideas with the community.
+  - name: 🛡️ Report a security vulnerability
+    url: https://github.com/nRn-World/Doggy-Player/security/policy
+    about: Please report vulnerabilities privately by e-mail — never in a public issue.
+  - name: ☕ Support development
+    url: https://ko-fi.com/nrnworld
+    about: Buy nRn World a coffee and keep Doggy Player improving.

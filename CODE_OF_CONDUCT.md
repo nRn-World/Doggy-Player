@@ -1,5 +1,9 @@
 # Contributor Covenant Code of Conduct
 
+This code of conduct applies to every Doggy Player community space — GitHub
+issues, pull requests, discussions, and any other place where you represent the
+project. Project maintainers are reachable at **bynrnworld@gmail.com**.
+
 ## Our Pledge
 
 We as members, contributors, and leaders pledge to make participation in our
@@ -62,6 +66,8 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
 **bynrnworld@gmail.com**.
 All complaints will be reviewed and investigated promptly and fairly.
+Reports are handled privately; please do not open a public issue about another
+person's behavior.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
@@ -87,7 +93,7 @@ of actions.
 
 **Consequence**: A warning with consequences for continued behavior. No
 interaction with the people involved, including unsolicited interaction with
-those those enforcing the Code of Conduct, for a specified period of time. This
+those enforcing the Code of Conduct, for a specified period of time. This
 includes avoiding interactions in community spaces as well as external channels
 like social media. Violating these terms may lead to a temporary or
 permanent ban.

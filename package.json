@@ -2,7 +2,16 @@
   "name": "doggy-player",
   "private": true,
   "version": "1.1.75",
-  "description": "Doggy Video Player",
+  "description": "Modern Electron video player with VLC-style instant seeking",
+  "license": "CC-BY-NC-4.0",
+  "homepage": "https://github.com/nRn-World/Doggy-Player/releases/latest",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nRn-World/Doggy-Player.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nRn-World/Doggy-Player/issues"
+  },
   "author": {
     "name": "nRn World",
     "email": "bynrnworld@gmail.com"
