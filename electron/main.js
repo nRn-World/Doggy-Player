@@ -662,7 +662,8 @@ function startStreamServer() {
     server.get('/stream', async (req, res) => {
       const videoPath = req.query.path;
       const transcode = req.query.transcode === 'true';
-      const start = req.query.start ? parseFloat(req.query.start) : 0;
+      const parsedStart = parseFloat(req.query.start);
+      const start = Number.isFinite(parsedStart) && parsedStart > 0 ? parsedStart : 0;
       // Remote items are only served through the re-encoding pipe — that is how
       // an IPTV/VOD stream with an undecodable video track gets a picture back.
       const isRemote = /^https?:\/\//i.test(videoPath || '');
@@ -688,9 +689,10 @@ function startStreamServer() {
       if (transcode || needsFullTranscode) {
         // Never copy a video codec Chromium cannot decode: that is the
         // "audio plays, picture stays black" failure, and it is silent.
-        const videoCodec = await probeVideoCodecCached(videoPath);
-        const needsReencode = needsFullTranscode || forceVideo || !DECODABLE_VIDEO_CODECS.has(videoCodec);
-        console.log(`[Stream] ${needsReencode ? 'Transcoding' : 'Remuxing'} video (${videoCodec || 'unknown codec'}) from ${start}s: ${videoPath}`);
+        const { videoCodec } = await probeStreamCodecsCached(videoPath);
+        const hasVideo = !!videoCodec;
+        const needsReencode = hasVideo && (needsFullTranscode || forceVideo || !DECODABLE_VIDEO_CODECS.has(videoCodec));
+        console.log(`[Stream] ${hasVideo ? (needsReencode ? 'Transcoding' : 'Remuxing') : 'Audio-only stream'} (${videoCodec || 'no video track'}) from ${start}s: ${videoPath}`);
 
         // Kill previous transcode so rapid seeks don't stack FFmpeg processes
         if (activeTranscodeCommand) {
@@ -729,23 +731,25 @@ function startStreamServer() {
           command.seekInput(start);
         }
 
-        if (needsReencode) {
-          // Latency-tuned, but with the audio interleaved from the first
-          // packets: `-tune zerolatency` (plus `-max_interleave_delta 0`) was
-          // measured to push the first audio packet ~0.4s further into the
-          // stream, so the player opened on picture alone and only then caught
-          // up with the sound — heard (and seen) as a short vibration right
-          // after every seek. Without those two flags the very first audio
-          // packet sits ~0.4s earlier, next to the first picture. Preset/CRF/
-          // GOP still decide quality and how cheaply the stream can be seeked.
-          command.videoCodec('libx264')
-                 .addOptions([
-                   '-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p',
-                   '-g 48', '-keyint_min 48',
-                   '-flush_packets 1'
-                 ]);
-        } else {
-          command.videoCodec('copy');
+        if (hasVideo) {
+          if (needsReencode) {
+            // Latency-tuned, but with the audio interleaved from the first
+            // packets: `-tune zerolatency` (plus `-max_interleave_delta 0`) was
+            // measured to push the first audio packet ~0.4s further into the
+            // stream, so the player opened on picture alone and only then caught
+            // up with the sound — heard (and seen) as a short vibration right
+            // after every seek. Without those two flags the very first audio
+            // packet sits ~0.4s earlier, next to the first picture. Preset/CRF/
+            // GOP still decide quality and how cheaply the stream can be seeked.
+            command.videoCodec('libx264')
+                   .addOptions([
+                     '-preset ultrafast', '-crf 23', '-threads 0', '-pix_fmt yuv420p',
+                     '-g 48', '-keyint_min 48',
+                     '-flush_packets 1'
+                   ]);
+          } else {
+            command.videoCodec('copy');
+          }
         }
 
         command.audioCodec('aac')
