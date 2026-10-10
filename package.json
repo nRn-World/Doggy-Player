@@ -25,6 +25,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "test": "node --test scripts/unit-tests.test.js",
     "dev:electron": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://127.0.0.1:3000 && electron .\"",
     "build:electron": "npm run build && electron-builder --win",
     "build:electron:mac": "npm run build && electron-builder --mac",

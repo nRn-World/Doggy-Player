@@ -1179,10 +1179,41 @@ export default function App() {
     "6923": { url: "http://premiumtest.tr:8080", user: "hBHCQDmz", pass: "ggY6RMm" }
   };
 
+  // Helper: encode text/JSON to base64 safely (handles Unicode)
+  const utf8ToBase64 = (str: string): string => {
+    try {
+      const bytes = new TextEncoder().encode(str);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    } catch {
+      return '';
+    }
+  };
+
+  const base64ToUtf8 = (str: string): string => {
+    try {
+      const binary = atob(str);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return new TextDecoder().decode(bytes);
+    } catch {
+      return '';
+    }
+  };
+
+  const safeDomId = (str: string): string => {
+    return 'osd-channel-' + utf8ToBase64(str).replace(/[^a-zA-Z0-9]/g, '');
+  };
+
   // Helper: encode JSON to URL-safe base64
   const encodeForKV = (obj: object): string => {
     const json = JSON.stringify(obj);
-    const b64 = btoa(unescape(encodeURIComponent(json)));
+    const b64 = utf8ToBase64(json);
     // Replace + with -, / with _ and strip = padding
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   };
@@ -1194,8 +1225,8 @@ export default function App() {
     const padLen = (4 - (cleaned.length % 4)) % 4;
     const padded = cleaned.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(padLen);
     try {
-      const json = decodeURIComponent(escape(atob(padded)));
-      return JSON.parse(json);
+      const json = base64ToUtf8(padded);
+      return json ? JSON.parse(json) : null;
     } catch {
       return null;
     }
@@ -1358,7 +1389,7 @@ export default function App() {
   const getSyncKey = () => {
     const mainIdentity = xtreamUrl ? `${xtreamUrl}|${xtreamUser}` : m3uUrl;
     if (!mainIdentity) return null;
-    return `favs_${btoa(unescape(encodeURIComponent(mainIdentity))).replace(/[^a-zA-Z0-9]/g, '')}`;
+    return `favs_${utf8ToBase64(mainIdentity).replace(/[^a-zA-Z0-9]/g, '')}`;
   };
 
   const saveToCloud = async (favs: string[], folders: FavoriteFolder[]) => {
@@ -1427,12 +1458,12 @@ export default function App() {
     if (showIptvOverlay && videoSrc) {
       setTimeout(() => {
         try {
-          const activeId = `osd-channel-${btoa(videoSrc).replace(/[^a-zA-Z0-9]/g, '')}`;
+          const activeId = safeDomId(videoSrc);
           const el = document.getElementById(activeId);
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
-        } catch (e) { /* ignore base64 errors */ }
+        } catch (e) { /* ignore errors */ }
       }, 100);
     }
   }, [showIptvOverlay, videoSrc, selectedCategoryId, iptvType]);
@@ -2155,17 +2186,31 @@ export default function App() {
     const cues: SubCue[] = [];
     const blocks = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split(/\n\s*\n/);
     const timeToSec = (t: string) => {
-      const [h, m, rest] = t.split(':');
-      const [s, ms] = rest.replace(',', '.').split('.');
-      return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseFloat('0.' + (ms || '0'));
+      if (!t) return Number.NaN;
+      const [timePart, msPart] = t.trim().replace(',', '.').split('.');
+      const parts = timePart.split(':').map(p => parseInt(p, 10));
+      if (parts.some(p => Number.isNaN(p))) return Number.NaN;
+      let secs = 0;
+      if (parts.length === 3) {
+        secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        secs = parts[0] * 60 + parts[1];
+      } else {
+        return Number.NaN;
+      }
+      const ms = msPart ? parseFloat('0.' + msPart) : 0;
+      return secs + (Number.isNaN(ms) ? 0 : ms);
     };
     for (const block of blocks) {
       const lines = block.trim().split('\n');
       const timeLine = lines.find(l => l.includes('-->'));
       if (!timeLine) continue;
-      const [startStr, endStr] = timeLine.split('-->').map(s => s.trim());
-      const text = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
-      if (text) cues.push({ start: timeToSec(startStr), end: timeToSec(endStr), text });
+      const [startStr, endStr] = timeLine.split('-->').map(s => s.trim().split(' ')[0]);
+      const start = timeToSec(startStr);
+      const end = timeToSec(endStr);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      const cueText = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+      if (cueText) cues.push({ start, end, text: cueText });
     }
     return cues;
   };
@@ -2173,11 +2218,20 @@ export default function App() {
   const parseVTT = (text: string): SubCue[] => {
     const cleaned = text.replace(/^WEBVTT.*\n?/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const timeToSec = (t: string) => {
-      const parts = t.split(':');
-      let h = 0, m = 0, s = 0;
-      if (parts.length === 3) { h = parseInt(parts[0]); m = parseInt(parts[1]); s = parseFloat(parts[2].replace(',', '.')); }
-      else { m = parseInt(parts[0]); s = parseFloat(parts[1].replace(',', '.')); }
-      return h * 3600 + m * 60 + s;
+      if (!t) return Number.NaN;
+      const [timePart, msPart] = t.trim().replace(',', '.').split('.');
+      const parts = timePart.split(':').map(p => parseInt(p, 10));
+      if (parts.some(p => Number.isNaN(p))) return Number.NaN;
+      let secs = 0;
+      if (parts.length === 3) {
+        secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        secs = parts[0] * 60 + parts[1];
+      } else {
+        return Number.NaN;
+      }
+      const ms = msPart ? parseFloat('0.' + msPart) : 0;
+      return secs + (Number.isNaN(ms) ? 0 : ms);
     };
     const cues: SubCue[] = [];
     const blocks = cleaned.trim().split(/\n\s*\n/);
@@ -2186,8 +2240,11 @@ export default function App() {
       const timeLine = lines.find(l => l.includes('-->'));
       if (!timeLine) continue;
       const [startStr, endStr] = timeLine.split('-->').map(s => s.trim().split(' ')[0]);
-      const text = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
-      if (text) cues.push({ start: timeToSec(startStr), end: timeToSec(endStr), text });
+      const start = timeToSec(startStr);
+      const end = timeToSec(endStr);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      const cueText = lines.slice(lines.indexOf(timeLine) + 1).join('\n').replace(/<[^>]+>/g, '').trim();
+      if (cueText) cues.push({ start, end, text: cueText });
     }
     return cues;
   };
@@ -2197,9 +2254,20 @@ export default function App() {
     const cues: SubCue[] = [];
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     const toSec = (t: string) => {
-      const [h, m, rest] = t.split(':');
-      const [s, cs] = rest.split('.');
-      return parseInt(h) * 3600 + parseInt(m) * 60 + parseInt(s) + parseInt(cs || '0') / 100;
+      if (!t) return Number.NaN;
+      const [timePart, csPart] = t.trim().split('.');
+      const parts = timePart.split(':').map(p => parseInt(p, 10));
+      if (parts.some(p => Number.isNaN(p))) return Number.NaN;
+      let secs = 0;
+      if (parts.length === 3) {
+        secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        secs = parts[0] * 60 + parts[1];
+      } else {
+        return Number.NaN;
+      }
+      const cs = csPart ? parseInt(csPart, 10) / (csPart.length === 3 ? 1000 : 100) : 0;
+      return secs + (Number.isNaN(cs) ? 0 : cs);
     };
     let formatLine: string[] = [];
     for (const line of lines) {
@@ -2211,11 +2279,15 @@ export default function App() {
         const startIdx = formatLine.indexOf('start');
         const endIdx = formatLine.indexOf('end');
         const textIdx = formatLine.indexOf('text');
-        if (startIdx < 0 || endIdx < 0) continue;
-        const start = toSec(parts[startIdx]?.trim() || '0:00:00.00');
-        const end = toSec(parts[endIdx]?.trim() || '0:00:00.00');
-        const rawText = parts.slice(textIdx >= 0 ? textIdx : 9).join(',')
-          .replace(/\{[^}]+\}/g, '').replace(/\\N/g, '\n').replace(/\\n/g, '\n').trim();
+        const sIdx = startIdx >= 0 ? startIdx : 1;
+        const eIdx = endIdx >= 0 ? endIdx : 2;
+        const tIdx = textIdx >= 0 ? textIdx : 9;
+        if (parts.length <= Math.max(sIdx, eIdx)) continue;
+        const start = toSec(parts[sIdx]?.trim());
+        const end = toSec(parts[eIdx]?.trim());
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+        const rawText = parts.slice(tIdx).join(',')
+          .replace(/\{[^}]+\}/g, '').replace(/\\N/gi, '\n').replace(/\\n/g, '\n').trim();
         if (rawText) cues.push({ start, end, text: rawText });
       }
     }
@@ -2229,13 +2301,21 @@ export default function App() {
     const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     for (const line of lines) {
       const fpsMatch = line.match(/^\{1\}\{1\}([\d.]+)/);
-      if (fpsMatch) { fps = parseFloat(fpsMatch[1]); continue; }
+      if (fpsMatch) {
+        const parsedFps = parseFloat(fpsMatch[1]);
+        if (Number.isFinite(parsedFps) && parsedFps > 0) fps = parsedFps;
+        continue;
+      }
       const match = line.match(/^\{(\d+)\}\{(\d+)\}(.+)/);
       if (!match) continue;
-      const start = parseInt(match[1]) / fps;
-      const end = parseInt(match[2]) / fps;
-      const text = match[3].replace(/\|/g, '\n').replace(/\{[^}]+\}/g, '').trim();
-      if (text) cues.push({ start, end, text });
+      const startFrame = parseInt(match[1], 10);
+      const endFrame = parseInt(match[2], 10);
+      if (Number.isNaN(startFrame) || Number.isNaN(endFrame)) continue;
+      const start = startFrame / fps;
+      const end = endFrame / fps;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+      const cueText = match[3].replace(/\|/g, '\n').replace(/\{[^}]+\}/g, '').trim();
+      if (cueText) cues.push({ start, end, text: cueText });
     }
     return cues;
   };
@@ -2245,8 +2325,15 @@ export default function App() {
     const cues: SubCue[] = [];
     const syncMatches = [...text.matchAll(/<SYNC[^>]+Start=["']?(\d+)["']?[^>]*>([\s\S]*?)(?=<SYNC|<\/BODY|$)/gi)];
     for (let i = 0; i < syncMatches.length; i++) {
-      const start = parseInt(syncMatches[i][1]) / 1000;
-      const end = i + 1 < syncMatches.length ? parseInt(syncMatches[i + 1][1]) / 1000 : start + 3;
+      const startMs = parseInt(syncMatches[i][1], 10);
+      if (Number.isNaN(startMs)) continue;
+      const start = startMs / 1000;
+      let end = start + 3;
+      if (i + 1 < syncMatches.length) {
+        const nextMs = parseInt(syncMatches[i + 1][1], 10);
+        if (Number.isFinite(nextMs)) end = nextMs / 1000;
+      }
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
       const raw = syncMatches[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').trim();
       if (raw && raw !== '&nbsp;') cues.push({ start, end, text: raw });
     }
@@ -4078,7 +4165,7 @@ export default function App() {
                                        // Panel stays open per user request
                                     }
                                  }} 
-                                 id={`osd-channel-${btoa(item.url || '').replace(/[^a-zA-Z0-9]/g, '')}`}
+                                 id={safeDomId(item.url || '')}
                                   className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all border ${videoSrc === item.url ? 'bg-theme-accent/20 border-l-[3px] border-l-theme-accent shadow-lg shadow-theme-accent/20 scale-[1.02]' : 'border-transparent border-l-[3px] border-l-transparent hover:border-theme-border/30 hover:bg-white/5 backdrop-blur-sm'}`}
                                >
                                      <div className="w-12 h-8 shrink-0 bg-black/50 rounded flex items-center justify-center p-0.5 overflow-hidden">
